@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "action": "ensure-and-launch-rustdesk",
+  "attended": true,
+  "artifacts": [
+    {
+      "platform": "windows",
+      "architecture": "x86_64",
+      "version": "1.4.9",
+      "url": "https://support.sinbarconsultants.com/download/vendor/rustdesk/1.4.9/windows/rustdesk-1.4.9-x86_64.msi",
+      "sha256": "${RUSTDESK_WINDOWS_X86_64_SHA256}",
+      "kind": "msi",
+      "publisherSubjectContains": "PURSLANE"
+    },
+    {
+      "platform": "windows",
+      "architecture": "arm64",
+      "version": "1.4.9",
+      "url": "https://support.sinbarconsultants.com/download/vendor/rustdesk/1.4.9/windows/rustdesk-1.4.9-aarch64.msi",
+      "sha256": "${RUSTDESK_WINDOWS_ARM64_SHA256}",
+      "kind": "msi",
+      "publisherSubjectContains": "PURSLANE"
+    },
+    {
+      "platform": "macos",
+      "architecture": "x86_64",
+      "version": "1.4.9",
+      "url": "https://support.sinbarconsultants.com/download/vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-x86_64.dmg",
+      "sha256": "${RUSTDESK_MACOS_X86_64_SHA256}",
+      "kind": "dmg",
+      "bundleIdentifier": "com.carriez.rustdesk",
+      "teamIdentifier": "${RUSTDESK_MACOS_TEAM_IDENTIFIER}"
+    },
+    {
+      "platform": "macos",
+      "architecture": "arm64",
+      "version": "1.4.9",
+      "url": "https://support.sinbarconsultants.com/download/vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-aarch64.dmg",
+      "sha256": "${RUSTDESK_MACOS_ARM64_SHA256}",
+      "kind": "dmg",
+      "bundleIdentifier": "com.carriez.rustdesk",
+      "teamIdentifier": "${RUSTDESK_MACOS_TEAM_IDENTIFIER}"
+    }
+  ]
+}

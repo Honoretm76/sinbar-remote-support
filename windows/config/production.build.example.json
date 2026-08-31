@@ -1,0 +1,8 @@
+{
+  "manifestPublicKeyX963Base64Url": "REPLACE_WITH_65_BYTE_P256_X963_PUBLIC_KEY_BASE64URL",
+  "rustDeskPublisherSpkiSha256": "REPLACE_WITH_64_HEX_SHA256_OF_AUTHENTICODE_LEAF_CERTIFICATE_SPKI",
+  "codeSigningCertificateThumbprint": "REPLACE_WITH_40_HEX_AUTHENTICODE_CERT_THUMBPRINT",
+  "timestampUrl": "http://timestamp.digicert.com",
+  "downloadPath": "/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe",
+  "notes": "Public key and certificate thumbprint are not secrets. Never place a private manifest key or code-signing private key in this file or repository."
+}

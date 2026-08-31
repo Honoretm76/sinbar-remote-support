@@ -3,9 +3,14 @@
 **/.ruff_cache/
 **/.swiftpm/
 **/.build/
+**/.venv/
+**/venv/
 **/bin/
 **/obj/
 **/dist/
+**/data/
+**/coverage/
+**/htmlcov/
 
 *.py[cod]
 *.exe
@@ -17,9 +22,21 @@
 *.p8
 *.pem
 *.key
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+.coverage
+coverage.xml
 .DS_Store
 
 .env
 .env.*
+*.env
 !.env.example
-
+!*.env.example

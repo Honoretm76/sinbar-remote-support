@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>SinbarSupportAssistant</AssemblyName>
+    <RootNamespace>Sinbar.Support.Assistant</RootNamespace>
+    <VersionPrefix>2.0.0</VersionPrefix>
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
+    <PublishSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</PublishSingleFile>
+    <DebugType>embedded</DebugType>
+    <ManifestPublicKeyX963Base64Url Condition="'$(ManifestPublicKeyX963Base64Url)' == ''">UNCONFIGURED</ManifestPublicKeyX963Base64Url>
+    <RustDeskPublisherSpkiSha256 Condition="'$(RustDeskPublisherSpkiSha256)' == ''">UNCONFIGURED</RustDeskPublisherSpkiSha256>
+  </PropertyGroup>
+
+  <Target Name="RejectUnconfiguredReleaseTrust" BeforeTargets="CoreCompile"
+          Condition="'$(Configuration)' == 'Release'">
+    <Error Condition="'$(ManifestPublicKeyX963Base64Url)' == 'UNCONFIGURED'"
+           Text="Release builds require ManifestPublicKeyX963Base64Url (65-byte P-256 X9.63 public key, base64url)." />
+    <Error Condition="'$(RustDeskPublisherSpkiSha256)' == 'UNCONFIGURED'"
+           Text="Release builds require RustDeskPublisherSpkiSha256 (64 lowercase/uppercase hex characters)." />
+  </Target>
+
+  <Target Name="RejectMalformedReleaseTrust" BeforeTargets="CoreCompile"
+          Condition="'$(Configuration)' == 'Release'">
+    <Error Condition="'$([System.Text.RegularExpressions.Regex]::IsMatch('$(ManifestPublicKeyX963Base64Url)', '^[A-Za-z0-9_-]{87}$'))' != 'True'"
+           Text="ManifestPublicKeyX963Base64Url must be exactly 87 base64url characters." />
+    <Error Condition="'$([System.Text.RegularExpressions.Regex]::IsMatch('$(RustDeskPublisherSpkiSha256)', '^[A-Fa-f0-9]{64}$'))' != 'True'"
+           Text="RustDeskPublisherSpkiSha256 must be exactly 64 hexadecimal characters." />
+  </Target>
+
+  <ItemGroup>
+    <AssemblyMetadata
+      Include="SinbarManifestPublicKeyX963Base64Url"
+      Value="$(ManifestPublicKeyX963Base64Url)" />
+    <AssemblyMetadata
+      Include="SinbarRustDeskPublisherSpkiSha256"
+      Value="$(RustDeskPublisherSpkiSha256)" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>APIBaseURL</key>
+    <string>https://support.sinbarconsultants.com</string>
+    <key>ArtifactPathPrefix</key>
+    <string>/download/vendor/rustdesk/</string>
+    <key>ManifestKeyID</key>
+    <string>__MANIFEST_KEY_ID__</string>
+    <key>ManifestP256PublicKeyX963Base64URL</key>
+    <string>__MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL__</string>
+    <key>RustDeskBundleIdentifier</key>
+    <string>__RUSTDESK_BUNDLE_IDENTIFIER__</string>
+    <key>RustDeskTeamIdentifier</key>
+    <string>__RUSTDESK_TEAM_IDENTIFIER__</string>
+    <key>RustDeskArtifacts</key>
+    <dict>
+        <key>arm64</key>
+        <dict>
+            <key>Kind</key>
+            <string>dmg</string>
+            <key>SHA256</key>
+            <string>__RUSTDESK_ARM64_DMG_SHA256__</string>
+            <key>URL</key>
+            <string>https://support.sinbarconsultants.com/download/vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-aarch64.dmg</string>
+            <key>Version</key>
+            <string>1.4.9</string>
+        </dict>
+        <key>x86_64</key>
+        <dict>
+            <key>Kind</key>
+            <string>dmg</string>
+            <key>SHA256</key>
+            <string>__RUSTDESK_X86_64_DMG_SHA256__</string>
+            <key>URL</key>
+            <string>https://support.sinbarconsultants.com/download/vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-x86_64.dmg</string>
+            <key>Version</key>
+            <string>1.4.9</string>
+        </dict>
+    </dict>
+    <key>AssistantBundleIdentifier</key>
+    <string>com.sinbarconsultants.supportassistant</string>
+    <key>SinbarTeamIdentifier</key>
+    <string>__SINBAR_TEAM_IDENTIFIER__</string>
+    <key>HelperCodeIdentifier</key>
+    <string>com.sinbarconsultants.supportassistant.installhelper</string>
+    <key>AssistantVersion</key>
+    <string>2.0.0</string>
+    <key>MaximumArtifactBytes</key>
+    <integer>536870912</integer>
+</dict>
+</plist>

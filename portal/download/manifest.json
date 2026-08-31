@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "portalVersion": "2.0.0",
+  "experience": "intel-style-local-assistant-launch",
+  "supportMode": "attended",
+  "permanentPasswordConfigured": false,
+  "brand": {
+    "name": "Sinbar Consultants LLC",
+    "logo": "/assets/sinbar-primary-logo.jpg",
+    "logoSha256": "984ed311238503646099debb13ab82369b795b8e289c4a7b6a98de3f4bfed9ed",
+    "colors": [
+      "#000000",
+      "#050505",
+      "#0b0b0b",
+      "#c9a84c",
+      "#9b7926",
+      "#ffffff"
+    ]
+  },
+  "sessionContract": {
+    "method": "POST",
+    "path": "/api/v1/support/sessions",
+    "requestFields": [
+      "platform",
+      "architecture"
+    ],
+    "responseFields": [
+      "protocolUrl",
+      "expiresAt",
+      "installerUrl"
+    ],
+    "protocolTemplate": "sinbarsupport://start?token=<base64url>",
+    "maximumLifetimeSeconds": 120,
+    "sameOriginOnly": true,
+    "cache": "no-store"
+  },
+  "installers": [
+    {
+      "platform": "windows",
+      "architectures": [
+        "x86_64",
+        "arm64"
+      ],
+      "path": "/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe",
+      "mediaType": "application/vnd.microsoft.portable-executable",
+      "signatureRequirement": "Authenticode signature from Sinbar Consultants LLC",
+      "publicationStatus": "artifact-required"
+    },
+    {
+      "platform": "macos",
+      "architectures": [
+        "x86_64",
+        "arm64"
+      ],
+      "path": "/download/v2.0.0/macos/Sinbar-Support-Assistant.pkg",
+      "mediaType": "application/vnd.apple.installer+xml",
+      "signatureRequirement": "Apple Developer ID Installer signature, notarization, and stapling",
+      "publicationStatus": "artifact-required"
+    }
+  ],
+  "security": {
+    "firstVisitRequiresLocalInstall": true,
+    "administratorApprovalRequired": true,
+    "arbitraryProtocolUrlsAccepted": false,
+    "arbitraryInstallerUrlsAccepted": false,
+    "externalAssets": false,
+    "telemetry": false,
+    "secretsEmbedded": false
+  }
+}

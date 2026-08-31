@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050505">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Start a secure attended remote-support session with Sinbar Consultants.">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; media-src 'none'; font-src 'none'; worker-src 'none'; manifest-src 'self'">
+  <title>Sinbar Remote Support</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#support-launcher">Skip to remote support</a>
+
+  <div class="page-shell">
+    <header class="site-header" aria-label="Sinbar Consultants">
+      <a class="brand" href="https://sinbarconsultants.com/" aria-label="Sinbar Consultants home">
+        <img class="brand-logo" src="/assets/sinbar-primary-logo.jpg" alt="Sinbar Consultants logo" width="181" height="208">
+        <span class="brand-copy">
+          <span class="brand-name">Sinbar</span>
+          <span class="brand-company">Consultants LLC</span>
+        </span>
+      </a>
+
+      <div class="secure-label" aria-label="Secure attended support">
+        <span class="secure-dot" aria-hidden="true"></span>
+        Secure attended support
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="launch-stage" id="support-launcher" aria-labelledby="page-title">
+        <div class="launch-copy">
+          <p class="eyebrow">Official Sinbar support portal</p>
+          <h1 id="page-title">Start remote support.<br><span>We will guide the rest.</span></h1>
+          <p class="lead">One secure button opens the Sinbar Support Assistant already installed on your computer. On your first visit, we will help you install it once.</p>
+
+          <div class="device-line" aria-live="polite">
+            <span class="device-indicator" aria-hidden="true"></span>
+            <span id="device-summary">Checking this device&hellip;</span>
+          </div>
+
+          <button class="start-button" id="start-support" type="button" aria-describedby="start-help">
+            <span class="button-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M8.2 5.5 16.5 12l-8.3 6.5z"></path>
+              </svg>
+            </span>
+            <span class="button-copy">
+              <strong>Start Remote Support</strong>
+              <small id="start-button-detail">Open the secure Sinbar assistant</small>
+            </span>
+            <span class="button-arrow" aria-hidden="true">&rarr;</span>
+          </button>
+
+          <p class="start-help" id="start-help">Only continue when you are already speaking with a Sinbar technician.</p>
+
+          <div class="launch-status" id="launch-status" role="status" aria-live="polite" aria-atomic="true" hidden>
+            <span class="status-spinner" id="status-spinner" aria-hidden="true"></span>
+            <span id="status-message"></span>
+          </div>
+        </div>
+
+        <aside class="process-card" aria-labelledby="process-title">
+          <div class="process-card-head">
+            <p class="card-kicker">How it works</p>
+            <h2 id="process-title">Fast now. Easier next time.</h2>
+          </div>
+
+          <ol class="process-list">
+            <li class="process-step">
+              <span class="step-number" aria-hidden="true">1</span>
+              <div>
+                <strong>Start the session</strong>
+                <p>Click the gold button. A short-lived, one-time session is created for this device.</p>
+              </div>
+            </li>
+            <li class="process-step">
+              <span class="step-number" aria-hidden="true">2</span>
+              <div>
+                <strong>Open Sinbar Support</strong>
+                <p>Returning customers approve the browser prompt and the installed assistant opens.</p>
+              </div>
+            </li>
+            <li class="process-step">
+              <span class="step-number" aria-hidden="true">3</span>
+              <div>
+                <strong>Approve attended access</strong>
+                <p>You remain in control and can end the support session at any time.</p>
+              </div>
+            </li>
+          </ol>
+
+          <div class="trust-row" aria-label="Security safeguards">
+            <span>One-time session</span>
+            <span>Sinbar sends no password</span>
+          </div>
+        </aside>
+      </section>
+
+      <section class="visit-guidance" aria-labelledby="visit-title">
+        <div class="section-heading">
+          <p class="eyebrow">One button, two paths</p>
+          <h2 id="visit-title">What you will see</h2>
+        </div>
+
+        <div class="visit-grid">
+          <article class="visit-card returning-card">
+            <span class="visit-label">Returning visit</span>
+            <h3>The assistant opens directly</h3>
+            <p>Your browser may ask permission to open <strong>Sinbar Support</strong>. Select <strong>Open</strong>; the assistant handles the secure connection.</p>
+          </article>
+
+          <article class="visit-card first-card">
+            <span class="visit-label">First visit</span>
+            <h3>Install and approve once</h3>
+            <p>If the assistant is not installed, choose the signed Windows or macOS installer. Your operating system will request administrator approval.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="security-panel" aria-labelledby="security-title">
+        <div>
+          <p class="eyebrow">Safe by design</p>
+          <h2 id="security-title">You control every session.</h2>
+        </div>
+        <ul>
+          <li>The launch token is short-lived and usable once.</li>
+          <li>The Sinbar workflow never creates or sends a permanent password.</li>
+          <li>Installers must be code-signed before publication.</li>
+          <li>Never approve a session from an unexpected caller.</li>
+        </ul>
+      </section>
+
+      <noscript>
+        <section class="noscript-panel" aria-labelledby="javascript-title">
+          <h2 id="javascript-title">JavaScript is required to create a secure session</h2>
+          <p>Enable JavaScript and reload this page, or contact Sinbar support at <a href="tel:+13477200367">347-720-0367</a>.</p>
+        </section>
+      </noscript>
+    </main>
+
+    <footer class="site-footer">
+      <p>Sinbar Consultants LLC</p>
+      <p><a href="tel:+13477200367">347-720-0367</a><span aria-hidden="true">&middot;</span><a href="mailto:support@sinbarconsultants.com">support@sinbarconsultants.com</a></p>
+      <p class="footer-note">Attended support only. Disconnect at any time.</p>
+    </footer>
+  </div>
+
+  <dialog class="assistant-dialog" id="assistant-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+    <div class="dialog-shell">
+      <div class="dialog-accent" aria-hidden="true"></div>
+      <form method="dialog" class="dialog-close-form">
+        <button class="dialog-close" type="submit" aria-label="Close">&times;</button>
+      </form>
+
+      <div class="dialog-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <path d="M12 3a9 9 0 1 0 9 9 9 9 0 0 0-9-9Zm1 13.5h-2v-2h2Zm0-4h-2v-5h2Z"></path>
+        </svg>
+      </div>
+
+      <p class="dialog-kicker" id="dialog-kicker">First visit</p>
+      <h2 id="dialog-title">Did Sinbar Support open?</h2>
+      <p id="dialog-description">If your browser displayed an <strong>Open Sinbar Support</strong> prompt, approve it. If nothing opened, install the signed assistant once.</p>
+
+      <div class="installer-actions" aria-label="Sinbar Support Assistant installers">
+        <a class="installer-link" id="windows-installer" href="/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe">
+          <span class="installer-platform" aria-hidden="true">&#8862;</span>
+          <span>
+            <strong>Install for Windows</strong>
+            <small>Signed setup &middot; Windows 10 or 11</small>
+          </span>
+          <span class="installer-arrow" aria-hidden="true">&darr;</span>
+        </a>
+
+        <a class="installer-link" id="macos-installer" href="/download/v2.0.0/macos/Sinbar-Support-Assistant.pkg">
+          <span class="installer-platform" aria-hidden="true">&#8984;</span>
+          <span>
+            <strong>Install for macOS</strong>
+            <small>Signed and notarized package</small>
+          </span>
+          <span class="installer-arrow" aria-hidden="true">&darr;</span>
+        </a>
+      </div>
+
+      <div class="first-time-steps">
+        <p><strong>First time:</strong> Open the downloaded installer, approve the operating-system prompt, then return here and select <strong>Start Remote Support</strong>.</p>
+        <p class="mac-permission-note" id="mac-permission-note" hidden><strong>Mac:</strong> Apple also requires you to approve Screen Recording and Accessibility. Those privacy safeguards cannot be skipped.</p>
+      </div>
+
+      <div class="dialog-footer">
+        <button class="try-again" id="try-again" type="button">Try opening again</button>
+        <form method="dialog">
+          <button class="not-now" type="submit">Not now</button>
+        </form>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>

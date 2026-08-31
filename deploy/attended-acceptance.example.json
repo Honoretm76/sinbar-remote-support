@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "releaseVersion": "2.0.0",
+  "sourceCommit": "REPLACE_WITH_REVIEWED_40_CHARACTER_GIT_COMMIT",
+  "reviewedAt": "REPLACE_WITH_RFC3339_UTC_TIMESTAMP",
+  "reviewedBy": [
+    "REPLACE_WITH_WINDOWS_REVIEWER",
+    "REPLACE_WITH_MACOS_REVIEWER"
+  ],
+  "reviewTicket": "REPLACE_WITH_CHANGE_OR_ACCEPTANCE_TICKET",
+  "supportMode": "attended",
+  "manifestKeyId": "sinbar-support-manifest-p256-v1",
+  "manifestPublicKeyPinSha256": "REPLACE_WITH_SHA256_OF_87_CHARACTER_PUBLIC_PIN_TEXT",
+  "installerSha256": {
+    "windows": "REPLACE_WITH_WINDOWS_INSTALLER_SHA256",
+    "macos": "REPLACE_WITH_MACOS_INSTALLER_SHA256"
+  },
+  "cleanDeviceTests": {
+    "windows": {
+      "firstInstallTrustPromptObserved": true,
+      "returningProtocolLaunchSucceeded": true,
+      "noPermanentPasswordConfigured": true,
+      "remoteControlRequiresCustomerAcceptance": true,
+      "assistantClosedAfterLaunch": true,
+      "temporaryFilesRemoved": true
+    },
+    "macos": {
+      "firstInstallTrustPromptObserved": true,
+      "returningProtocolLaunchSucceeded": true,
+      "noPermanentPasswordConfigured": true,
+      "remoteControlRequiresCustomerAcceptance": true,
+      "assistantClosedAfterLaunch": true,
+      "temporaryFilesRemoved": true
+    }
+  },
+  "preconfiguredHostTests": {
+    "windows": {
+      "existingRustDeskServiceDetected": true,
+      "storedPermanentPasswordRejectedOrRemoved": true,
+      "unattendedAccessDisabled": true,
+      "customerAttendedControlVerified": true,
+      "launchAbortedIfRemediationFailed": true
+    },
+    "macos": {
+      "existingRustDeskServiceDetected": true,
+      "storedPermanentPasswordRejectedOrRemoved": true,
+      "unattendedAccessDisabled": true,
+      "customerAttendedControlVerified": true,
+      "launchAbortedIfRemediationFailed": true
+    }
+  }
+}

@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
+APP_ROOT=/opt/sinbar/apps/noc-support/support-portal
+BACKUP_ROOT=/opt/sinbar/backups/support-portal
+DEPLOYMENT_ENV=/etc/sinbar/support-deployment.env
+SESSION_ENV=/etc/sinbar/support-session-api.env
+PRIVATE_KEY=/etc/sinbar/secrets/support-manifest-p256.pem
+PUBLIC_ORIGIN=https://support.sinbarconsultants.com
+LOCAL_ORIGIN=http://127.0.0.1:8092
+RELEASE_DIR=
+RUSTDESK_DIR=
+ROLLBACK_BACKUP=
+LOCK_FILE=/run/lock/sinbar-support-deploy.lock
+
+usage() {
+  cat <<'EOF'
+Usage:
+  sinbar-support-deploy status
+  sinbar-support-deploy preflight --release-dir DIR --rustdesk-dir DIR
+  sinbar-support-deploy deploy --release-dir DIR --rustdesk-dir DIR
+  sinbar-support-deploy rollback --backup DIR
+
+Options:
+  --deployment-env FILE   default /etc/sinbar/support-deployment.env
+  --session-env FILE      default /etc/sinbar/support-session-api.env
+  --private-key FILE      default /etc/sinbar/secrets/support-manifest-p256.pem
+  --app-root DIR          default /opt/sinbar/apps/noc-support/support-portal
+  --backup-root DIR       default /opt/sinbar/backups/support-portal
+
+The release directory must contain the two signed installers, post-signing
+manifest/checksums, and both native verification receipts. RustDesk input is
+the exact windows/ and macos/ tree documented in DEPLOYMENT.md.
+EOF
+}
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+log() { printf '%s [INFO] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+pass() { printf '%s [PASS] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+[[ $# -ge 1 ]] || { usage; exit 2; }
+COMMAND=$1
+shift
+while (($#)); do
+  case $1 in
+    --release-dir) [[ $# -ge 2 ]] || die 'missing --release-dir value'; RELEASE_DIR=$2; shift 2 ;;
+    --rustdesk-dir) [[ $# -ge 2 ]] || die 'missing --rustdesk-dir value'; RUSTDESK_DIR=$2; shift 2 ;;
+    --deployment-env) [[ $# -ge 2 ]] || die 'missing --deployment-env value'; DEPLOYMENT_ENV=$2; shift 2 ;;
+    --session-env) [[ $# -ge 2 ]] || die 'missing --session-env value'; SESSION_ENV=$2; shift 2 ;;
+    --private-key) [[ $# -ge 2 ]] || die 'missing --private-key value'; PRIVATE_KEY=$2; shift 2 ;;
+    --app-root) [[ $# -ge 2 ]] || die 'missing --app-root value'; APP_ROOT=$2; shift 2 ;;
+    --backup-root) [[ $# -ge 2 ]] || die 'missing --backup-root value'; BACKUP_ROOT=$2; shift 2 ;;
+    --backup) [[ $# -ge 2 ]] || die 'missing --backup value'; ROLLBACK_BACKUP=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+require_root() { [[ $EUID -eq 0 ]] || die 'run this command with sudo'; }
+require_tools() {
+  local tool
+  for tool in python3 openssl docker curl sha256sum tar flock; do
+    command -v "$tool" >/dev/null || die "required command is missing: $tool"
+  done
+  docker compose version >/dev/null 2>&1 || die 'Docker Compose v2 is required'
+}
+
+load_deployment_env() {
+  local line name value
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ -z ${line//[[:space:]]/} || $line =~ ^[[:space:]]*# ]] && continue
+    [[ $line == *=* ]] || die "invalid deployment environment line"
+    name=${line%%=*}
+    value=${line#*=}
+    export "$name=$value"
+  done < "$DEPLOYMENT_ENV"
+}
+
+compose() {
+  docker compose --project-name support-portal \
+    --env-file "$DEPLOYMENT_ENV" \
+    --file "$APP_ROOT/compose.yaml" \
+    --file "$APP_ROOT/compose.assistant.yaml" "$@"
+}
+
+base_compose() {
+  docker compose --project-name support-portal \
+    --file "$APP_ROOT/compose.yaml" "$@"
+}
+
+cloudflared_runtime_check() {
+  local address
+  address=$(docker inspect "$CLOUDFLARED_CONTAINER" \
+    --format "{{with index .NetworkSettings.Networks \"$CLOUDFLARED_NETWORK\"}}{{.IPAddress}}{{end}}") \
+    || die "cannot inspect $CLOUDFLARED_CONTAINER"
+  [[ -n $address ]] || die "$CLOUDFLARED_CONTAINER is not attached to configured network $CLOUDFLARED_NETWORK"
+  CLOUD_CIDR=$CLOUDFLARED_PROXY_CIDR ADDRESS=$address python3 - <<'PY'
+import ipaddress, os
+network = ipaddress.ip_network(os.environ["CLOUD_CIDR"], strict=False)
+address = ipaddress.ip_address(os.environ["ADDRESS"])
+if network.prefixlen != 32 or address != network.network_address:
+    raise SystemExit("ERROR: configured Cloudflared /32 is not its exact current IP on the configured network")
+print("PASS: exact Cloudflared container/network/IP matches the real-IP trust /32")
+PY
+}
+
+docker_network_overlap_check() {
+  local subnets
+  subnets=$(docker network inspect $(docker network ls -q) \
+    --format '{{.Name}}{{range .IPAM.Config}} {{.Subnet}}{{end}}' 2>/dev/null || true)
+  TARGET_SUBNET=$SUPPORT_SESSION_SUBNET NETWORKS=$subnets python3 - <<'PY'
+import ipaddress, os
+target = ipaddress.ip_network(os.environ["TARGET_SUBNET"], strict=True)
+for line in os.environ.get("NETWORKS", "").splitlines():
+    fields = line.split()
+    if not fields or fields[0] == "support-portal_support-session":
+        continue
+    for value in fields[1:]:
+        try: current = ipaddress.ip_network(value, strict=False)
+        except ValueError: continue
+        if target.overlaps(current):
+            raise SystemExit(f"ERROR: support-session subnet overlaps Docker network {fields[0]} ({current})")
+print("PASS: dedicated support-session subnet does not overlap existing Docker networks")
+PY
+}
+
+python_preflight() {
+  [[ -n $RELEASE_DIR && -n $RUSTDESK_DIR ]] || die '--release-dir and --rustdesk-dir are required'
+  python3 "$SCRIPT_DIR/preflight.py" validate \
+    --project-root "$PROJECT_ROOT" \
+    --release-dir "$RELEASE_DIR" \
+    --rustdesk-dir "$RUSTDESK_DIR" \
+    --deployment-env "$DEPLOYMENT_ENV" \
+    --session-env "$SESSION_ENV" \
+    --private-key "$PRIVATE_KEY"
+}
+
+pull_and_verify_image() {
+  docker pull "$SUPPORT_API_IMAGE"
+  docker image inspect "$SUPPORT_API_IMAGE" >/dev/null
+  local revision version
+  revision=$(docker image inspect "$SUPPORT_API_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+  version=$(docker image inspect "$SUPPORT_API_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
+  [[ $revision == "$REVIEWED_SOURCE_COMMIT" ]] || die 'API image revision label does not match reviewed source/release commit'
+  [[ $version == 2.0.0 ]] || die 'API image version label is not 2.0.0'
+  pass "immutable support API image is locally available: $SUPPORT_API_IMAGE"
+}
+
+render_and_test_compose() {
+  local release_path=$1
+  SUPPORT_RELEASE_CURRENT=$release_path compose config --quiet
+  SUPPORT_RELEASE_CURRENT=$release_path compose config > /dev/null
+  pass 'base Compose plus production overlay renders successfully'
+}
+
+test_nginx_config() {
+  local config=$1 portal_image
+  portal_image=$(docker inspect sinbar-support-portal --format '{{.Image}}') \
+    || die 'existing sinbar-support-portal container is required'
+  docker run --rm --network none --add-host support-session-api:127.0.0.1 \
+    --read-only --tmpfs /var/cache/nginx --tmpfs /var/run \
+    --volume "$config:/etc/nginx/conf.d/default.conf:ro" \
+    --entrypoint nginx "$portal_image" -t
+  pass 'new Nginx configuration passed nginx -t before portal recreation'
+}
+
+wait_healthy() {
+  local container=$1 health=missing attempt
+  for attempt in $(seq 1 36); do
+    health=$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' 2>/dev/null || true)
+    [[ $health == healthy ]] && { pass "$container is healthy"; return; }
+    [[ $health == unhealthy ]] && break
+    sleep 5
+  done
+  docker inspect "$container" --format '{{range .State.Health.Log}}{{println .End "exit=" .ExitCode .Output}}{{end}}' 2>/dev/null || true
+  die "$container did not become healthy (status=$health)"
+}
+
+http_code() {
+  curl --max-time 20 --silent --show-error --location --output /dev/null \
+    --write-out '%{http_code}' "$1"
+}
+
+smoke_origin() {
+  local origin=$1 public_label=$2 path expected
+  for path in / /assets/sinbar-primary-logo.jpg /download/manifest.json \
+    /download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe \
+    /download/v2.0.0/macos/Sinbar-Support-Assistant.pkg; do
+    expected=$(http_code "$origin$path?deploy-smoke=$(date +%s)")
+    [[ $expected == 200 ]] || die "$public_label smoke failed for $path (HTTP $expected)"
+  done
+  pass "$public_label page, logo, manifest, and both installers return HTTP 200"
+}
+
+verify_local_download_hashes() {
+  local root=$1 target expected actual platform architecture name suffix
+  for target in windows:x86_64 windows:arm64 macos:x86_64 macos:arm64; do
+    platform=${target%%:*}; architecture=${target##*:}
+    case $target in
+      windows:x86_64) name=rustdesk-1.4.9-x86_64.msi; expected=c87d2f4cef2a5acd6003b6507dcfbf5d5168a256db082cd90b54d35193224aaa ;;
+      windows:arm64) name=rustdesk-1.4.9-aarch64.msi; expected=30bc8925e62c7ade52371758c2b944036ed2386f6c554e9e59f3bcfef06c7cd9 ;;
+      macos:x86_64) name=rustdesk-1.4.9-x86_64.dmg; expected=fa1129a0635019f9c5841937942cc2b08be028a192f47c009edde7e53812904e ;;
+      macos:arm64) name=rustdesk-1.4.9-aarch64.dmg; expected=f7935597b247d42c8f2a2ed71176a9f5868018cd9e1a33b8096418a668c8caf0 ;;
+    esac
+    actual=$(curl --fail --max-time 120 --silent --show-error \
+      "$root/download/vendor/rustdesk/1.4.9/$platform/$name" | sha256sum | awk '{print $1}')
+    [[ $actual == "$expected" ]] || die "served RustDesk hash mismatch for $target"
+  done
+  pass 'all four locally served RustDesk mirrors match pinned SHA-256 values'
+}
+
+smoke_session_api() {
+  local response
+  response=$(curl --fail --max-time 15 --silent --show-error \
+    --header 'Content-Type: application/json' \
+    --header "Origin: $PUBLIC_ORIGIN" \
+    --data '{"platform":"windows","architecture":"unknown"}' \
+    "$LOCAL_ORIGIN/api/v1/support/sessions")
+  RESPONSE=$response python3 - <<'PY'
+import datetime as dt, json, os, re
+body=json.loads(os.environ["RESPONSE"])
+if set(body) != {"protocolUrl","expiresAt","installerUrl"}: raise SystemExit("ERROR: issue response schema mismatch")
+if not re.fullmatch(r"sinbarsupport://start[?]token=[A-Za-z0-9_-]{43}", body["protocolUrl"]): raise SystemExit("ERROR: protocol URL mismatch")
+if body["installerUrl"] != "/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe": raise SystemExit("ERROR: installer URL mismatch")
+expires=dt.datetime.strptime(body["expiresAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+remaining=(expires-dt.datetime.now(dt.timezone.utc)).total_seconds()
+if not 1 <= remaining <= 120: raise SystemExit("ERROR: issued session lifetime mismatch")
+print("PASS: same-origin session issue API returned a 43-character, <=120-second launch URL")
+PY
+}
+
+write_backup() {
+  local stamp=$1 backup=$2 item
+  install -d -m 0700 "$backup"
+  {
+    printf 'schemaVersion=1\n'
+    printf 'stamp=%s\n' "$stamp"
+    if [[ -L $APP_ROOT/current ]]; then
+      printf 'previousCurrentType=symlink\npreviousCurrentTarget=%s\n' "$(readlink "$APP_ROOT/current")"
+    elif [[ -e $APP_ROOT/current ]]; then
+      die "$APP_ROOT/current exists but is not a symlink"
+    else
+      printf 'previousCurrentType=missing\npreviousCurrentTarget=\n'
+    fi
+    [[ -f $APP_ROOT/compose.assistant.yaml ]] && printf 'previousOverlay=present\n' || printf 'previousOverlay=missing\n'
+  } > "$backup/state.env"
+  chmod 0600 "$backup/state.env"
+
+  local -a entries=(compose.yaml nginx.conf site)
+  [[ -e $APP_ROOT/current || -L $APP_ROOT/current ]] && entries+=(current)
+  [[ -e $APP_ROOT/compose.assistant.yaml ]] && entries+=(compose.assistant.yaml)
+  [[ -e $APP_ROOT/nginx.intel-style.conf ]] && entries+=(nginx.intel-style.conf)
+  tar --directory "$APP_ROOT" --create --gzip --file "$backup/live-state.tar.gz" -- "${entries[@]}"
+  chmod 0600 "$backup/live-state.tar.gz"
+  (cd "$backup" && sha256sum live-state.tar.gz state.env > SHA256SUMS && chmod 0600 SHA256SUMS && sha256sum --check SHA256SUMS)
+  pass "recoverable pre-deployment backup created: $backup"
+}
+
+rollback_from_backup() {
+  local backup=$1 previous_overlay previous_type previous_target
+  [[ -d $backup && ! -L $backup ]] || die "invalid backup directory: $backup"
+  (cd "$backup" && sha256sum --check SHA256SUMS) || die 'backup checksum verification failed'
+  previous_overlay=$(awk -F= '$1=="previousOverlay"{print $2}' "$backup/state.env")
+  previous_type=$(awk -F= '$1=="previousCurrentType"{print $2}' "$backup/state.env")
+  previous_target=$(awk -F= '$1=="previousCurrentTarget"{sub(/^[^=]*=/,""); print}' "$backup/state.env")
+
+  rm -f -- "$APP_ROOT/current" "$APP_ROOT/compose.assistant.yaml" "$APP_ROOT/nginx.intel-style.conf"
+  tar --directory "$APP_ROOT" --extract --gzip --file "$backup/live-state.tar.gz"
+  if [[ $previous_type == missing ]]; then rm -f -- "$APP_ROOT/current"; fi
+
+  if [[ $previous_overlay == present ]]; then
+    load_deployment_env
+    compose up -d --no-build --pull never
+  else
+    base_compose up -d --no-deps --force-recreate support-portal
+    docker rm --force sinbar-support-session-api >/dev/null 2>&1 || true
+  fi
+  pass "rollback restored pre-deployment state from $backup"
+}
+
+status() {
+  require_tools
+  printf 'Sinbar Support Assistant deployment status\n\n'
+  if [[ -L $APP_ROOT/current ]]; then
+    printf 'current_release=%s\n' "$(readlink -f "$APP_ROOT/current")"
+    [[ -f $APP_ROOT/current/DEPLOYED_RELEASE.json ]] && python3 -m json.tool "$APP_ROOT/current/DEPLOYED_RELEASE.json"
+  else
+    printf 'current_release=not-deployed\n'
+  fi
+  docker ps --filter name=sinbar-support-portal --filter name=sinbar-support-session-api \
+    --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+  printf 'local_http=%s\n' "$(http_code "$LOCAL_ORIGIN/" || true)"
+  printf 'public_https=%s\n' "$(http_code "$PUBLIC_ORIGIN/" || true)"
+}
+
+preflight() {
+  require_root; require_tools; python_preflight; load_deployment_env
+  cloudflared_runtime_check
+  docker_network_overlap_check
+  pull_and_verify_image
+  local temp
+  temp=$(mktemp -d "$APP_ROOT/.preflight.XXXXXX")
+  python3 "$SCRIPT_DIR/preflight.py" stage --project-root "$PROJECT_ROOT" \
+    --release-dir "$RELEASE_DIR" --rustdesk-dir "$RUSTDESK_DIR" \
+    --deployment-env "$DEPLOYMENT_ENV" --session-env "$SESSION_ENV" \
+    --private-key "$PRIVATE_KEY" --stage-root "$temp/release"
+  render_and_test_compose "$temp/release"
+  test_nginx_config "$temp/release/nginx.conf"
+  rm -rf -- "$temp"
+  pass 'all production preflight gates passed; no live files or containers were changed'
+}
+
+deploy() {
+  require_root; require_tools
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || die 'another support deployment is running'
+  python_preflight; load_deployment_env; cloudflared_runtime_check; docker_network_overlap_check
+  pull_and_verify_image
+
+  local stamp stage release_path backup state_changed=0 completed=0
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  stage=$(mktemp -d "$APP_ROOT/.deploy-v2.0.0.XXXXXX")
+  release_path="$APP_ROOT/releases/2.0.0-$stamp"
+  backup="$BACKUP_ROOT/${stamp}-pre-v2.0.0"
+
+  cleanup() {
+    local rc=$?
+    if [[ $completed -ne 1 && $state_changed -eq 1 ]]; then
+      printf 'ERROR: deployment failed; automatic rollback starting\n' >&2
+      rollback_from_backup "$backup" || printf 'CRITICAL: automatic rollback failed; inspect %s\n' "$backup" >&2
+    fi
+    [[ -d $stage ]] && rm -rf -- "$stage"
+    exit "$rc"
+  }
+  trap cleanup EXIT
+
+  python3 "$SCRIPT_DIR/preflight.py" stage --project-root "$PROJECT_ROOT" \
+    --release-dir "$RELEASE_DIR" --rustdesk-dir "$RUSTDESK_DIR" \
+    --deployment-env "$DEPLOYMENT_ENV" --session-env "$SESSION_ENV" \
+    --private-key "$PRIVATE_KEY" --stage-root "$stage/release"
+  render_and_test_compose "$stage/release"
+  test_nginx_config "$stage/release/nginx.conf"
+  write_backup "$stamp" "$backup"
+
+  install -d -m 0755 "$APP_ROOT/releases"
+  install -d -o 10001 -g 10001 -m 0700 "$APP_ROOT/support-session-data"
+  mv -- "$stage/release" "$release_path"
+  install -o root -g root -m 0644 "$release_path/compose.assistant.yaml" "$APP_ROOT/compose.assistant.yaml.new"
+  mv -f -- "$APP_ROOT/compose.assistant.yaml.new" "$APP_ROOT/compose.assistant.yaml"
+  ln -s -- "releases/${release_path##*/}" "$APP_ROOT/current.new"
+  mv -Tf -- "$APP_ROOT/current.new" "$APP_ROOT/current"
+  state_changed=1
+
+  compose up -d --no-deps --no-build --pull never support-session-api
+  wait_healthy sinbar-support-session-api
+  compose up -d --no-deps --force-recreate --no-build --pull never support-portal
+  wait_healthy sinbar-support-portal
+  cloudflared_runtime_check
+  smoke_origin "$LOCAL_ORIGIN" 'local portal'
+  verify_local_download_hashes "$LOCAL_ORIGIN"
+  smoke_session_api
+  smoke_origin "$PUBLIC_ORIGIN" 'public portal'
+
+  completed=1
+  trap - EXIT
+  rm -rf -- "$stage"
+  pass "Sinbar Support Assistant $VERSION deployed successfully"
+  printf 'release=%s\nbackup=%s\n' "$release_path" "$backup"
+}
+
+case $COMMAND in
+  status) status ;;
+  preflight) preflight ;;
+  deploy) deploy ;;
+  rollback)
+    require_root; require_tools
+    [[ -n $ROLLBACK_BACKUP ]] || die '--backup is required for rollback'
+    exec 9>"$LOCK_FILE"; flock -n 9 || die 'another support deployment is running'
+    rollback_from_backup "$ROLLBACK_BACKUP"
+    ;;
+  help) usage ;;
+  *) usage; exit 2 ;;
+esac

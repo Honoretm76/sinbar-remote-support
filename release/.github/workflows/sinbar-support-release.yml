@@ -1,0 +1,330 @@
+name: Sinbar Support signed release
+
+on:
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'macos/**'
+      - 'portal/**'
+      - 'server/**'
+      - 'deploy/**'
+      - 'tests/**'
+      - 'release/**'
+      - '.github/workflows/sinbar-support-release.yml'
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - 'windows/**'
+      - 'macos/**'
+      - 'portal/**'
+      - 'server/**'
+      - 'deploy/**'
+      - 'tests/**'
+      - 'release/**'
+      - '.github/workflows/sinbar-support-release.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: sinbar-support-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  validate-contract:
+    name: Validate cross-platform release contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MANIFEST_KEY_ID: ${{ vars.MANIFEST_KEY_ID }}
+    steps:
+      - name: Check out the reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate names, versions, paths, and fixed RustDesk release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=''
+          if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            tag="$GITHUB_REF_NAME"
+          fi
+          python3 release/scripts/validate_release_contract.py \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --tag "$tag" \
+            --manifest-key-id "$MANIFEST_KEY_ID"
+          python3 tests/validate_integration.py
+          python3 windows/tests/linux/validate_source.py
+          bash macos/tests/run-linux-tests.sh
+          python3 portal/tests/validate_portal.py
+          python3 -m py_compile deploy/preflight.py
+          python3 -m json.tool deploy/attended-acceptance.example.json >/dev/null
+          bash -n deploy/sinbar-support-deploy deploy/verify-macos-release.sh
+
+      - name: Run Support Session API tests from hash-locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/server-test-venv"
+          "$RUNNER_TEMP/server-test-venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --require-hashes \
+            --requirement release/server-test-requirements.lock
+          PYTHONPATH=server \
+            "$RUNNER_TEMP/server-test-venv/bin/python" -m pytest -q server/tests
+
+  validate-windows:
+    name: Validate Windows source
+    needs: validate-contract
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL: ${{ vars.MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL }}
+      RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256: ${{ vars.RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 }}
+    steps:
+      - name: Check out the reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run Windows contract tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL)) {
+            throw 'Repository variable MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL is required.'
+          }
+          if ($env:RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 -notmatch '^[A-Fa-f0-9]{64}$') {
+            throw 'Repository variable RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 must be a verified 64-hex SPKI SHA-256 pin.'
+          }
+          if (-not (dotnet --list-sdks | Select-String -Pattern '^8\.')) {
+            throw '.NET 8 SDK is required on the Windows release runner.'
+          }
+          dotnet run `
+            --project windows/tests/ContractTests/ContractTests.csproj `
+            --configuration Release `
+            -p:ManifestPublicKeyX963Base64Url=$env:MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL `
+            -p:RustDeskPublisherSpkiSha256=$env:RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Windows contract tests failed.'
+          }
+
+  validate-macos:
+    name: Validate macOS source
+    needs: validate-contract
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compile and test both Swift products
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift --version
+          swift test --package-path macos
+
+  release-windows:
+    name: Build and Authenticode-sign Windows
+    needs:
+      - validate-contract
+      - validate-windows
+      - validate-macos
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: windows-signing
+    env:
+      WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+      WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+      WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
+      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+      MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL: ${{ vars.MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL }}
+      RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256: ${{ vars.RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 }}
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build, sign, timestamp, and independently verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & release/scripts/Build-SignedWindowsRelease.ps1 `
+            -RepositoryRoot $env:GITHUB_WORKSPACE `
+            -OutputDirectory (Join-Path $env:RUNNER_TEMP 'release-windows')
+
+      - name: Upload verified Windows artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-windows
+          path: ${{ runner.temp }}/release-windows/Sinbar-Support-Assistant-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  release-macos:
+    name: Sign, notarize, and staple macOS
+    needs:
+      - validate-contract
+      - validate-windows
+      - validate-macos
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    environment: macos-signing
+    env:
+      APPLE_APPLICATION_P12_BASE64: ${{ secrets.APPLE_APPLICATION_P12_BASE64 }}
+      APPLE_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_APPLICATION_P12_PASSWORD }}
+      APPLE_INSTALLER_P12_BASE64: ${{ secrets.APPLE_INSTALLER_P12_BASE64 }}
+      APPLE_INSTALLER_P12_PASSWORD: ${{ secrets.APPLE_INSTALLER_P12_PASSWORD }}
+      APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      DEVELOPER_ID_APPLICATION: ${{ vars.APPLE_DEVELOPER_ID_APPLICATION }}
+      DEVELOPER_ID_INSTALLER: ${{ vars.APPLE_DEVELOPER_ID_INSTALLER }}
+      SINBAR_TEAM_IDENTIFIER: ${{ vars.APPLE_TEAM_ID }}
+      BUILD_NUMBER: ${{ github.run_number }}
+      MANIFEST_KEY_ID: ${{ vars.MANIFEST_KEY_ID }}
+      MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL: ${{ vars.MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL }}
+      RUSTDESK_BUNDLE_IDENTIFIER: ${{ vars.RUSTDESK_BUNDLE_IDENTIFIER }}
+      RUSTDESK_TEAM_IDENTIFIER: ${{ vars.RUSTDESK_TEAM_IDENTIFIER }}
+      RUSTDESK_X86_64_DMG_SHA256: ${{ vars.RUSTDESK_X86_64_DMG_SHA256 }}
+      RUSTDESK_ARM64_DMG_SHA256: ${{ vars.RUSTDESK_ARM64_DMG_SHA256 }}
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build, sign, notarize, staple, and independently verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash release/scripts/build-signed-macos-release.sh \
+            "$GITHUB_WORKSPACE" \
+            "$RUNNER_TEMP/release-macos"
+
+      - name: Upload verified macOS artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-macos
+          path: ${{ runner.temp }}/release-macos/Sinbar-Support-Assistant.pkg
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  assemble-release:
+    name: Create post-signing release manifest
+    needs:
+      - release-windows
+      - release-macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download only verified platform artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: signed-*
+          path: ${{ runner.temp }}/release-assets
+          merge-multiple: true
+
+      - name: Generate and verify SHA-256 metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          created_at="$(git show -s --format=%cI "$GITHUB_SHA")"
+          python3 release/scripts/create_release_manifest.py \
+            --assets-dir "$RUNNER_TEMP/release-assets" \
+            --output-dir "$RUNNER_TEMP/release-assets" \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --created-at "$created_at"
+          cd "$RUNNER_TEMP/release-assets"
+          sha256sum --check SHA256SUMS.txt
+
+      - name: Upload complete release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-bundle-${{ github.ref_name }}
+          path: |
+            ${{ runner.temp }}/release-assets/Sinbar-Support-Assistant-Setup.exe
+            ${{ runner.temp }}/release-assets/Sinbar-Support-Assistant.pkg
+            ${{ runner.temp }}/release-assets/release-manifest.json
+            ${{ runner.temp }}/release-assets/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  publish-release:
+    name: Upload and publish immutable release candidate
+    needs: assemble-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download complete release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bundle-${{ github.ref_name }}
+          path: ${{ runner.temp }}/release-bundle
+
+      - name: Reverify and publish without overwriting
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release-bundle"
+          sha256sum --check SHA256SUMS.txt
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo 'ERROR: a release with this tag already exists; refusing to overwrite it' >&2
+            exit 1
+          fi
+
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --draft \
+            --generate-notes \
+            --title "Sinbar Support Assistant ${GITHUB_REF_NAME}" \
+            Sinbar-Support-Assistant-Setup.exe \
+            Sinbar-Support-Assistant.pkg \
+            release-manifest.json \
+            SHA256SUMS.txt
+
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          expected = {
+              "Sinbar-Support-Assistant-Setup.exe",
+              "Sinbar-Support-Assistant.pkg",
+              "release-manifest.json",
+              "SHA256SUMS.txt",
+          }
+          payload = json.loads(
+              subprocess.check_output(
+                  ["gh", "release", "view", os.environ["GITHUB_REF_NAME"], "--json", "assets,isDraft"],
+                  text=True,
+              )
+          )
+          actual = {item["name"] for item in payload["assets"]}
+          if actual != expected or payload["isDraft"] is not True:
+              raise SystemExit(
+                  f"ERROR: draft release verification failed; expected={sorted(expected)}, actual={sorted(actual)}"
+              )
+          PY
+
+          gh release edit "$GITHUB_REF_NAME" --draft=false

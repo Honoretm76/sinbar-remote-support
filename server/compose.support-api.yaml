@@ -1,0 +1,33 @@
+services:
+  support-session-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sinbar/support-session-api:2.0.0
+    container_name: sinbar-support-session-api
+    restart: unless-stopped
+    env_file:
+      - /etc/sinbar/support-session-api.env
+    volumes:
+      - ./data:/data
+      - ./config/artifacts.json:/run/config/artifacts.json:ro
+      - /etc/sinbar/secrets/support-manifest-p256.pem:/run/secrets/support-manifest-p256.pem:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    expose:
+      - "8080"
+    networks:
+      - support-portal
+
+networks:
+  support-portal:
+    external: true
+    name: support-portal_default

@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+daemon_plist="/Library/LaunchDaemons/com.sinbarconsultants.supportassistant.installhelper.plist"
+
+/usr/sbin/chown root:wheel \
+    "/Library/PrivilegedHelperTools/com.sinbarconsultants.supportassistant.installhelper" \
+    "$daemon_plist" \
+    "/Library/Application Support/Sinbar Support Assistant/config.plist"
+/bin/chmod 0755 \
+    "/Library/PrivilegedHelperTools/com.sinbarconsultants.supportassistant.installhelper"
+/bin/chmod 0644 \
+    "$daemon_plist" \
+    "/Library/Application Support/Sinbar Support Assistant/config.plist"
+
+/bin/launchctl bootstrap system "$daemon_plist"
+/bin/launchctl enable \
+    system/com.sinbarconsultants.supportassistant.installhelper
+
+exit 0

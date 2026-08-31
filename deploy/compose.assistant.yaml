@@ -1,0 +1,56 @@
+services:
+  support-portal:
+    volumes:
+      - ${SUPPORT_RELEASE_CURRENT:-./current}/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${SUPPORT_RELEASE_CURRENT:-./current}/site:/usr/share/nginx/html:ro
+    depends_on:
+      support-session-api:
+        condition: service_healthy
+    networks:
+      support-session:
+        ipv4_address: ${SUPPORT_PORTAL_SESSION_IP:?Set SUPPORT_PORTAL_SESSION_IP}
+
+  support-session-api:
+    # Production accepts an immutable, reviewed image only. The deployment
+    # preflight rejects tags, missing digests, and placeholder digests.
+    image: ${SUPPORT_API_IMAGE:?Set SUPPORT_API_IMAGE to repository@sha256:digest}
+    container_name: sinbar-support-session-api
+    restart: unless-stopped
+    env_file:
+      - /etc/sinbar/support-session-api.env
+    volumes:
+      - ./support-session-data:/data
+      - ${SUPPORT_RELEASE_CURRENT:-./current}/support-session-api/config/artifacts.json:/run/config/artifacts.json:ro
+      - /etc/sinbar/secrets/support-manifest-p256.pem:/run/secrets/support-manifest-p256.pem:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request; p=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health',timeout=5)); raise SystemExit(0 if p.get('status')=='ok' else 1)"
+      interval: 30s
+      timeout: 7s
+      retries: 3
+      start_period: 20s
+    networks:
+      support-session:
+        ipv4_address: ${SUPPORT_API_SESSION_IP:?Set SUPPORT_API_SESSION_IP}
+
+networks:
+  support-session:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${SUPPORT_SESSION_SUBNET:?Set SUPPORT_SESSION_SUBNET}
