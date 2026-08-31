@@ -178,7 +178,7 @@ internal static class RustDeskManager
             WorkingDirectory = Path.GetDirectoryName(executable)!,
         };
 
-        Process.Start(startInfo)
+        _ = Process.Start(startInfo)
             ?? throw new InvalidOperationException("RustDesk could not be opened.");
     }
 

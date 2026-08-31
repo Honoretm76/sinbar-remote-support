@@ -64,7 +64,7 @@ internal sealed class SessionClient : IDisposable
             throw new SecurityException("The support service response is too large.");
         }
 
-        await response.Content.LoadIntoBufferAsync(SecurityPolicy.MaximumEnvelopeBytes, cancellationToken)
+        await response.Content.LoadIntoBufferAsync(SecurityPolicy.MaximumEnvelopeBytes)
             .ConfigureAwait(false);
         return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
     }

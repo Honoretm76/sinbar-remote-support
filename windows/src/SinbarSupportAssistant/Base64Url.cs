@@ -17,7 +17,7 @@ internal static class Base64Url
         }
 
         string padded = value.Replace('-', '+').Replace('_', '/');
-        padded += padded.Length % 4 switch
+        padded += (padded.Length % 4) switch
         {
             0 => string.Empty,
             2 => "==",
@@ -62,7 +62,7 @@ internal static class Base64Url
         }
 
         string padded = value.Replace('-', '+').Replace('_', '/');
-        padded += padded.Length % 4 switch
+        padded += (padded.Length % 4) switch
         {
             0 => string.Empty,
             2 => "==",

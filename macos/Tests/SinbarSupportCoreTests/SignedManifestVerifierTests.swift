@@ -53,7 +53,7 @@ final class SignedManifestVerifierTests: XCTestCase {
             artifactPathPrefix: "/download/vendor/rustdesk/",
             manifestKeyID: "test-key-1",
             manifestPublicKeyX963: privateKey.publicKey.x963Representation,
-            rustDeskBundleIdentifier: "com.example.rustdesk",
+            rustDeskBundleIdentifier: "com.carriez.rustdesk",
             rustDeskTeamIdentifier: "ABCDEFGHIJ",
             rustDeskArtifacts: [
                 .x86_64: .init(kind: .dmg, url: x64URL, sha256: hash, version: "1.4.9"),
