@@ -26,9 +26,9 @@
 
   <Target Name="RejectMalformedReleaseTrust" BeforeTargets="CoreCompile"
           Condition="'$(Configuration)' == 'Release'">
-    <Error Condition="'$([System.Text.RegularExpressions.Regex]::IsMatch('$(ManifestPublicKeyX963Base64Url)', '^[A-Za-z0-9_-]{87}$'))' != 'True'"
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ManifestPublicKeyX963Base64Url)', '^[A-Za-z0-9_-]{87}$'))"
            Text="ManifestPublicKeyX963Base64Url must be exactly 87 base64url characters." />
-    <Error Condition="'$([System.Text.RegularExpressions.Regex]::IsMatch('$(RustDeskPublisherSpkiSha256)', '^[A-Fa-f0-9]{64}$'))' != 'True'"
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(RustDeskPublisherSpkiSha256)', '^[A-Fa-f0-9]{64}$'))"
            Text="RustDeskPublisherSpkiSha256 must be exactly 64 hexadecimal characters." />
   </Target>
 

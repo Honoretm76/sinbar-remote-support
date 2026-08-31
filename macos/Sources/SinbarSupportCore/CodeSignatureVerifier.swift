@@ -59,7 +59,9 @@ public enum CodeSignatureVerifier {
             throw SupportError.codeSignatureFailure("publisher requirement cannot be created")
         }
 
-        let flags: SecCSFlags = [.checkAllArchitectures, .strictValidate, .checkNestedCode]
+        let flags = SecCSFlags(
+            rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode
+        )
         guard SecStaticCodeCheckValidity(staticCode, flags, requirement) == errSecSuccess else {
             throw SupportError.codeSignatureFailure("strict Apple code-signature validation failed")
         }
@@ -67,7 +69,7 @@ public enum CodeSignatureVerifier {
         var signingInformation: CFDictionary?
         guard SecCodeCopySigningInformation(
             staticCode,
-            [.signingInformation],
+            SecCSFlags(rawValue: kSecCSSigningInformation),
             &signingInformation
         ) == errSecSuccess,
         let info = signingInformation as? [String: Any],
