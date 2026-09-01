@@ -57,6 +57,7 @@ readonly PORTAL_CSS_SHA256="672644602a44b4207a001755384203c6826ae14aec349a9c79eb
 readonly PORTAL_MANIFEST_SHA256="11cbd7d9a662db82756c02214d22455fea03ddbcd9f3de4875b912a3b06522d5"
 readonly PORTAL_CHECKSUMS_SHA256="e3963ab1c1ee4dd68b261ea13bdd4d8fe3943fb35705ac5a6ea6bfa3c511cb7c"
 readonly PORTAL_NGINX_SHA256="9faec09ec3a0a2c1cb3c6217c5773965dd13dde65a4859aff24bef2d3e557936"
+readonly PORTAL_VALIDATOR_SHA256="5595254681d05c4523507cbcbba6c3b72d35d274f6a0d31163ecf116974dec8e"
 readonly PORTAL_LOGO_SHA256="984ed311238503646099debb13ab82369b795b8e289c4a7b6a98de3f4bfed9ed"
 
 readonly SERVER_HOST="remote.sinbarconsultants.net"
@@ -422,6 +423,7 @@ verify_source_file "portal/assets/styles.css" "$PORTAL_CSS_SHA256" "portal/asset
 verify_source_file "portal/download/manifest.json" "$PORTAL_MANIFEST_SHA256" "portal/download/manifest.json"
 verify_source_file "portal/download/SHA256SUMS.txt" "$PORTAL_CHECKSUMS_SHA256" "portal/download/SHA256SUMS.txt"
 verify_source_file "deploy/nginx.conf" "$PORTAL_NGINX_SHA256" "deploy/nginx.conf"
+verify_source_file "portal/tests/validate_portal.py" "$PORTAL_VALIDATOR_SHA256" "portal/tests/validate_portal.py"
 
 logo_source="${REPO_ROOT}/portal/assets/sinbar-primary-logo.jpg"
 if [[ ! -f "$logo_source" ]]; then
@@ -472,7 +474,7 @@ for key, (size, digest) in expected.items():
 print("PASS: portal manifest contract verified")
 PY
 
-python3 "${REPO_ROOT}/portal/tests/validate_portal.py"
+python3 -I "${REPO_ROOT}/portal/tests/validate_portal.py"
 grep -Fq "$COMPACT_CONFIG_TOKEN" "${REPO_ROOT}/deploy/nginx.conf" ||
     die "Nginx configuration does not contain the approved compact RustDesk token"
 grep -Fq "$WINDOWS_X64_DOWNLOAD_NAME" "${REPO_ROOT}/deploy/nginx.conf" ||
