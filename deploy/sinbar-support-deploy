@@ -1,386 +1,592 @@
 #!/usr/bin/env bash
+#
+# Deploy the reviewed Sinbar Remote Support portal v2.1.0 on noc-support.
+#
+# Usage:
+#   sudo ./deploy/sinbar-support-deploy \
+#     /home/honoretm/sinbar-remote-support-main.zip
+#
+# SOURCE may be either:
+#   - a GitHub "Download ZIP" archive of Honoretm76/sinbar-remote-support
+#     after PR #1 has been merged; or
+#   - a local checkout of that repository.
+#
+# The repository is private, so this script deliberately does not request,
+# read, or store GitHub credentials. All four installers are downloaded from
+# the official RustDesk 1.4.9 GitHub release and are accepted only after both
+# their exact byte counts and SHA-256 digests match the reviewed release.
+
 set -Eeuo pipefail
+shopt -s inherit_errexit nullglob
 umask 077
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
-APP_ROOT=/opt/sinbar/apps/noc-support/support-portal
-BACKUP_ROOT=/opt/sinbar/backups/support-portal
-DEPLOYMENT_ENV=/etc/sinbar/support-deployment.env
-SESSION_ENV=/etc/sinbar/support-session-api.env
-PRIVATE_KEY=/etc/sinbar/secrets/support-manifest-p256.pem
-PUBLIC_ORIGIN=https://support.sinbarconsultants.com
-LOCAL_ORIGIN=http://127.0.0.1:8092
-RELEASE_DIR=
-RUSTDESK_DIR=
-ROLLBACK_BACKUP=
-LOCK_FILE=/run/lock/sinbar-support-deploy.lock
+readonly SCRIPT_NAME="${0##*/}"
+readonly EXPECTED_HOSTNAME_SHORT="noc-support"
+readonly APP_ROOT="/opt/sinbar/apps/noc-support"
+readonly LIVE_ROOT="${APP_ROOT}/support-portal/site"
+readonly NGINX_CONFIG="${APP_ROOT}/support-portal/nginx.conf"
+readonly BACKUP_ROOT="/opt/sinbar/backups/support-portal"
+readonly CONTAINER="sinbar-support-portal"
+readonly LOCAL_BASE="http://127.0.0.1:8092"
+readonly PUBLIC_BASE="https://support.sinbarconsultants.com"
+readonly LOCK_FILE="/run/lock/sinbar-support-portal-deploy.lock"
+readonly SOURCE_INPUT="${1:-${PORTAL_SOURCE:-/home/honoretm/sinbar-remote-support-main.zip}}"
 
-usage() {
-  cat <<'EOF'
-Usage:
-  sinbar-support-deploy status
-  sinbar-support-deploy preflight --release-dir DIR --rustdesk-dir DIR
-  sinbar-support-deploy deploy --release-dir DIR --rustdesk-dir DIR
-  sinbar-support-deploy rollback --backup DIR
+readonly RUSTDESK_VERSION="1.4.9"
+readonly RUSTDESK_RELEASE_BASE="https://github.com/rustdesk/rustdesk/releases/download/${RUSTDESK_VERSION}"
 
-Options:
-  --deployment-env FILE   default /etc/sinbar/support-deployment.env
-  --session-env FILE      default /etc/sinbar/support-session-api.env
-  --private-key FILE      default /etc/sinbar/secrets/support-manifest-p256.pem
-  --app-root DIR          default /opt/sinbar/apps/noc-support/support-portal
-  --backup-root DIR       default /opt/sinbar/backups/support-portal
+readonly WIN_X64_FILE="rustdesk-1.4.9-x86_64.exe"
+readonly WIN_X64_BYTES="24472432"
+readonly WIN_X64_SHA256="eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274"
 
-The release directory must contain the two signed installers, post-signing
-manifest/checksums, and both native verification receipts. RustDesk input is
-the exact windows/ and macos/ tree documented in DEPLOYMENT.md.
-EOF
+readonly WIN_ARM64_FILE="rustdesk-1.4.9-aarch64.exe"
+readonly WIN_ARM64_BYTES="22318960"
+readonly WIN_ARM64_SHA256="c717bf52fdd601c58419e46c503176dd87187d174ebf8b3b5854ca381e8e9145"
+
+readonly MAC_X64_FILE="rustdesk-1.4.9-x86_64.dmg"
+readonly MAC_X64_BYTES="32503998"
+readonly MAC_X64_SHA256="fa1129a0635019f9c5841937942cc2b08be028a192f47c009edde7e53812904e"
+
+readonly MAC_ARM64_FILE="rustdesk-1.4.9-aarch64.dmg"
+readonly MAC_ARM64_BYTES="25906851"
+readonly MAC_ARM64_SHA256="f7935597b247d42c8f2a2ed71176a9f5868018cd9e1a33b8096418a668c8caf0"
+
+readonly PORTAL_INDEX_SHA256="2b2066639690c155f230a1091ffd02c083ab30a1a7542b359dee1bf2d7bd796c"
+readonly PORTAL_APP_SHA256="f253f9a24183d6b8aaf5b7dc9d209b4ea90984ea48e0dee1e649668b190e5952"
+readonly PORTAL_CSS_SHA256="9f5fb64f36aa81e68f7a78a83a94d83aba7a8b0481bab2944d0d5ba12e1e9885"
+readonly PORTAL_MANIFEST_SHA256="11cbd7d9a662db82756c02214d22455fea03ddbcd9f3de4875b912a3b06522d5"
+readonly PORTAL_CHECKSUMS_SHA256="e3963ab1c1ee4dd68b261ea13bdd4d8fe3943fb35705ac5a6ea6bfa3c511cb7c"
+readonly PORTAL_NGINX_SHA256="9faec09ec3a0a2c1cb3c6217c5773965dd13dde65a4859aff24bef2d3e557936"
+readonly PORTAL_LOGO_SHA256="984ed311238503646099debb13ab82369b795b8e289c4a7b6a98de3f4bfed9ed"
+
+readonly SERVER_HOST="remote.sinbarconsultants.net"
+readonly SERVER_KEY_SHA256="2f9f17cd56abc92fe53c75aafb97184841f5c4030d39f06164c47f1e0b2cd6aa"
+readonly COMPACT_CONFIG_TOKEN="QfiIiOikXYsVmciwiIiojIpBXYiwiI0VmbuMHduFGdsV3cu92YyFmYul2cuUGdv1WZyJiOiQ3cvhmIsISPrF2ZmNWZZ92TZd1dhJke4ckYm9mcLh1SpdEeK5kUtRWdOFlMJJHe4AHUyJiOikXZrJye"
+readonly WINDOWS_X64_DOWNLOAD_NAME="Sinbar-Remote-Support-qs--${COMPACT_CONFIG_TOKEN}.exe"
+readonly WINDOWS_ARM64_DOWNLOAD_NAME="Sinbar-Remote-Support-ARM64-qs--${COMPACT_CONFIG_TOKEN}.exe"
+readonly MAC_ARM64_DOWNLOAD_NAME="Sinbar-Remote-Support-macOS-Apple-Silicon.dmg"
+readonly MAC_X64_DOWNLOAD_NAME="Sinbar-Remote-Support-macOS-Intel.dmg"
+
+WORK_ROOT=""
+EXTRACT_ROOT=""
+STAGE_SITE=""
+VERIFY_ROOT=""
+BACKUP_DIR=""
+BACKUP_ARCHIVE=""
+REPO_ROOT=""
+DEPLOY_APPLIED=0
+DEPLOY_COMPLETE=0
+ROLLBACK_ACTIVE=0
+
+log() {
+    printf '%s [%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2"
 }
 
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-log() { printf '%s [INFO] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
-pass() { printf '%s [PASS] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+die() {
+    log ERROR "$*" >&2
+    exit 1
+}
 
-[[ $# -ge 1 ]] || { usage; exit 2; }
-COMMAND=$1
-shift
-while (($#)); do
-  case $1 in
-    --release-dir) [[ $# -ge 2 ]] || die 'missing --release-dir value'; RELEASE_DIR=$2; shift 2 ;;
-    --rustdesk-dir) [[ $# -ge 2 ]] || die 'missing --rustdesk-dir value'; RUSTDESK_DIR=$2; shift 2 ;;
-    --deployment-env) [[ $# -ge 2 ]] || die 'missing --deployment-env value'; DEPLOYMENT_ENV=$2; shift 2 ;;
-    --session-env) [[ $# -ge 2 ]] || die 'missing --session-env value'; SESSION_ENV=$2; shift 2 ;;
-    --private-key) [[ $# -ge 2 ]] || die 'missing --private-key value'; PRIVATE_KEY=$2; shift 2 ;;
-    --app-root) [[ $# -ge 2 ]] || die 'missing --app-root value'; APP_ROOT=$2; shift 2 ;;
-    --backup-root) [[ $# -ge 2 ]] || die 'missing --backup-root value'; BACKUP_ROOT=$2; shift 2 ;;
-    --backup) [[ $# -ge 2 ]] || die 'missing --backup value'; ROLLBACK_BACKUP=$2; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *) die "unknown option: $1" ;;
-  esac
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"
+}
+
+sha256_of() {
+    sha256sum -- "$1" | awk '{print $1}'
+}
+
+verify_file() {
+    local path="$1"
+    local expected_bytes="$2"
+    local expected_sha256="$3"
+    local label="$4"
+    local actual_bytes actual_sha256
+
+    [[ -f "$path" && ! -L "$path" ]] || die "$label is missing or is not a regular file: $path"
+
+    actual_bytes="$(stat -c '%s' -- "$path")"
+    [[ "$actual_bytes" == "$expected_bytes" ]] ||
+        die "$label byte-count mismatch: expected $expected_bytes, got $actual_bytes"
+
+    actual_sha256="$(sha256_of "$path")"
+    [[ "$actual_sha256" == "$expected_sha256" ]] ||
+        die "$label SHA-256 mismatch: expected $expected_sha256, got $actual_sha256"
+
+    log PASS "$label verified (${actual_bytes} bytes; SHA-256 ${actual_sha256})"
+}
+
+verify_source_file() {
+    local relative_path="$1"
+    local expected_sha256="$2"
+    local label="$3"
+    local path="${REPO_ROOT}/${relative_path}"
+    local actual_sha256
+
+    [[ -f "$path" && ! -L "$path" ]] || die "$label is missing: $path"
+    actual_sha256="$(sha256_of "$path")"
+    [[ "$actual_sha256" == "$expected_sha256" ]] ||
+        die "$label does not match the reviewed PR #1 content (got $actual_sha256)"
+
+    log PASS "$label matches the reviewed source"
+}
+
+download_official() {
+    local url="$1"
+    local destination="$2"
+    local expected_bytes="$3"
+    local expected_sha256="$4"
+    local label="$5"
+    local temporary="${destination}.partial"
+
+    rm -f -- "$temporary"
+    log INFO "Downloading $label from the official RustDesk release"
+
+    curl \
+        --fail \
+        --location \
+        --proto '=https' \
+        --proto-redir '=https' \
+        --tlsv1.2 \
+        --connect-timeout 20 \
+        --max-time 1200 \
+        --retry 4 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        --output "$temporary" \
+        "$url"
+
+    verify_file "$temporary" "$expected_bytes" "$expected_sha256" "$label"
+    mv -f -- "$temporary" "$destination"
+}
+
+atomic_install() {
+    local source="$1"
+    local destination="$2"
+    local temporary="${destination}.new.$$"
+
+    install -o root -g root -m 0644 -- "$source" "$temporary"
+    mv -f -- "$temporary" "$destination"
+}
+
+restore_backup() {
+    local rollback_result=0
+    local rollback_stage
+
+    (( ROLLBACK_ACTIVE == 0 )) || return 0
+    ROLLBACK_ACTIVE=1
+    set +e
+
+    log WARN "Deployment failed; restoring the pre-deployment portal and Nginx configuration"
+
+    if [[ -f "$BACKUP_ARCHIVE" ]]; then
+        rollback_stage="${WORK_ROOT}/rollback"
+        rm -rf -- "$rollback_stage"
+        install -d -m 0700 "$rollback_stage"
+        tar -C "$rollback_stage" -xzf "$BACKUP_ARCHIVE" || rollback_result=1
+
+        # These guards prevent a future edit from widening the destructive target.
+        if [[ "$LIVE_ROOT" == "/opt/sinbar/apps/noc-support/support-portal/site" &&
+              -d "$LIVE_ROOT" && ! -L "$LIVE_ROOT" ]]; then
+            find "$LIVE_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || rollback_result=1
+            cp -a -- "$rollback_stage/support-portal/site/." "$LIVE_ROOT/" || rollback_result=1
+
+            # nginx.conf is a direct file bind mount. Restore its bytes through
+            # the existing inode so the running container sees the rollback.
+            cp --preserve=mode,ownership,timestamps -- \
+                "$rollback_stage/support-portal/nginx.conf" "$NGINX_CONFIG" || rollback_result=1
+        else
+            log ERROR "Rollback guard rejected unexpected live root: $LIVE_ROOT"
+            rollback_result=1
+        fi
+    else
+        log ERROR "Rollback archive is unavailable"
+        rollback_result=1
+    fi
+
+    docker exec "$CONTAINER" nginx -t || rollback_result=1
+    docker exec "$CONTAINER" nginx -s reload || rollback_result=1
+
+    if (( rollback_result == 0 )); then
+        log PASS "Rollback completed successfully"
+    else
+        log ERROR "Rollback encountered an error; use backup $BACKUP_ARCHIVE before further changes"
+    fi
+
+    return "$rollback_result"
+}
+
+cleanup_and_exit() {
+    local rc=$?
+    trap - EXIT INT TERM HUP
+
+    if (( rc != 0 && DEPLOY_APPLIED == 1 && DEPLOY_COMPLETE == 0 )); then
+        restore_backup || true
+    fi
+
+    if [[ -n "$WORK_ROOT" && -d "$WORK_ROOT" ]]; then
+        rm -rf -- "$WORK_ROOT"
+    fi
+
+    exit "$rc"
+}
+
+check_text_route() {
+    local base="$1"
+    local path="$2"
+    local expected_type="$3"
+    local label="$4"
+    local cache_bust="deploy=$(date -u +%s)"
+    local result code content_type ssl_result url
+
+    url="${base}${path}"
+    if [[ "$base" == https://* ]]; then
+        url="${url}?${cache_bust}"
+    fi
+
+    result="$(curl --max-time 30 --silent --show-error --location --output /dev/null \
+        --write-out '%{http_code}|%{content_type}|%{ssl_verify_result}' "$url")"
+
+    code="${result%%|*}"
+    result="${result#*|}"
+    content_type="${result%%|*}"
+    ssl_result="${result##*|}"
+
+    [[ "$code" == "200" ]] || die "$label returned HTTP $code"
+    [[ "$content_type" == "$expected_type"* ]] ||
+        die "$label returned unexpected content type: $content_type"
+
+    if [[ "$base" == https://* ]]; then
+        [[ "$ssl_result" == "0" ]] || die "$label failed TLS validation: $ssl_result"
+    fi
+
+    log PASS "$label returned HTTP 200 ($content_type)"
+}
+
+verify_download_route() {
+    local base="$1"
+    local path="$2"
+    local expected_type="$3"
+    local expected_name="$4"
+    local expected_bytes="$5"
+    local expected_sha256="$6"
+    local label="$7"
+    local safe_label headers body url code content_type content_disposition ssl_result
+
+    safe_label="$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')"
+    headers="${VERIFY_ROOT}/${safe_label}.headers"
+    body="${VERIFY_ROOT}/${safe_label}.body"
+    url="${base}${path}"
+
+    if [[ "$base" == https://* ]]; then
+        url="${url}?deploy=$(date -u +%s%N)"
+    fi
+
+    curl \
+        --fail \
+        --location \
+        --proto-redir '=https' \
+        --connect-timeout 20 \
+        --max-time 1200 \
+        --retry 3 \
+        --retry-delay 2 \
+        --retry-all-errors \
+        --dump-header "$headers" \
+        --output "$body" \
+        --write-out '%{http_code}|%{content_type}|%{ssl_verify_result}' \
+        "$url" > "${headers}.result"
+
+    IFS='|' read -r code content_type ssl_result < "${headers}.result"
+
+    [[ "$code" == "200" ]] || die "$label returned HTTP $code"
+    [[ "$content_type" == "$expected_type"* ]] ||
+        die "$label returned unexpected content type: $content_type"
+
+    content_disposition="$(awk 'BEGIN {IGNORECASE=1} /^Content-Disposition:/ {sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); value=$0} END {print value}' "$headers")"
+    [[ "$content_disposition" == *"filename=\"${expected_name}\""* ]] ||
+        die "$label returned unexpected Content-Disposition: $content_disposition"
+
+    if [[ "$base" == https://* ]]; then
+        [[ "$ssl_result" == "0" ]] || die "$label failed TLS validation: $ssl_result"
+    fi
+
+    verify_file "$body" "$expected_bytes" "$expected_sha256" "$label response body"
+    rm -f -- "$body" "$headers" "${headers}.result"
+}
+
+verify_portal_endpoint() {
+    local base="$1"
+    local scope="$2"
+
+    check_text_route "$base" "/" "text/html" "$scope portal page"
+    check_text_route "$base" "/assets/sinbar-primary-logo.jpg" "image/jpeg" "$scope Sinbar logo"
+    check_text_route "$base" "/assets/styles.css" "text/css" "$scope portal stylesheet"
+    check_text_route "$base" "/assets/app.js" "application/javascript" "$scope portal application"
+    check_text_route "$base" "/download/manifest.json" "application/json" "$scope release manifest"
+    check_text_route "$base" "/download/SHA256SUMS.txt" "text/plain" "$scope checksum manifest"
+
+    verify_download_route "$base" "/download/windows/x64" \
+        "application/vnd.microsoft.portable-executable" "$WINDOWS_X64_DOWNLOAD_NAME" \
+        "$WIN_X64_BYTES" "$WIN_X64_SHA256" "$scope-Windows-x64"
+
+    verify_download_route "$base" "/download/windows/arm64" \
+        "application/vnd.microsoft.portable-executable" "$WINDOWS_ARM64_DOWNLOAD_NAME" \
+        "$WIN_ARM64_BYTES" "$WIN_ARM64_SHA256" "$scope-Windows-ARM64"
+
+    verify_download_route "$base" "/download/macos/apple-silicon" \
+        "application/x-apple-diskimage" "$MAC_ARM64_DOWNLOAD_NAME" \
+        "$MAC_ARM64_BYTES" "$MAC_ARM64_SHA256" "$scope-macOS-Apple-Silicon"
+
+    verify_download_route "$base" "/download/macos/intel" \
+        "application/x-apple-diskimage" "$MAC_X64_DOWNLOAD_NAME" \
+        "$MAC_X64_BYTES" "$MAC_X64_SHA256" "$scope-macOS-Intel"
+}
+
+trap cleanup_and_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+[[ "${EUID}" -eq 0 ]] || die "Run this script with sudo"
+
+for command_name in \
+    awk chmod cp curl date df docker find flock grep hostname install mktemp mv python3 \
+    readlink rm sed seq sha256sum sleep stat tar tr unzip
+do
+    require_command "$command_name"
 done
 
-require_root() { [[ $EUID -eq 0 ]] || die 'run this command with sudo'; }
-require_tools() {
-  local tool
-  for tool in python3 openssl docker curl sha256sum tar flock; do
-    command -v "$tool" >/dev/null || die "required command is missing: $tool"
-  done
-  docker compose version >/dev/null 2>&1 || die 'Docker Compose v2 is required'
-}
+exec 9>"$LOCK_FILE"
+flock -n 9 || die "Another support-portal deployment is already running"
 
-load_deployment_env() {
-  local line name value
-  while IFS= read -r line || [[ -n $line ]]; do
-    [[ -z ${line//[[:space:]]/} || $line =~ ^[[:space:]]*# ]] && continue
-    [[ $line == *=* ]] || die "invalid deployment environment line"
-    name=${line%%=*}
-    value=${line#*=}
-    export "$name=$value"
-  done < "$DEPLOYMENT_ENV"
-}
+current_hostname="$(hostname -s | tr '[:upper:]' '[:lower:]')"
+[[ "$current_hostname" == "$EXPECTED_HOSTNAME_SHORT" || "$current_hostname" == "noc-support"* ]] ||
+    die "Refusing to run on unexpected host: $current_hostname"
 
-compose() {
-  docker compose --project-name support-portal \
-    --env-file "$DEPLOYMENT_ENV" \
-    --file "$APP_ROOT/compose.yaml" \
-    --file "$APP_ROOT/compose.assistant.yaml" "$@"
-}
+[[ "$APP_ROOT" == "/opt/sinbar/apps/noc-support" ]] || die "Internal APP_ROOT guard failed"
+[[ -d "$LIVE_ROOT" && ! -L "$LIVE_ROOT" ]] || die "Live portal root is missing or unsafe: $LIVE_ROOT"
+[[ -f "$NGINX_CONFIG" && ! -L "$NGINX_CONFIG" ]] || die "Nginx configuration is missing or unsafe: $NGINX_CONFIG"
+[[ -e "$SOURCE_INPUT" ]] || die "Portal source was not found: $SOURCE_INPUT"
 
-base_compose() {
-  docker compose --project-name support-portal \
-    --file "$APP_ROOT/compose.yaml" "$@"
-}
+available_kib="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+[[ "$available_kib" =~ ^[0-9]+$ ]] || die "Could not determine available disk capacity"
+(( available_kib >= 1048576 )) ||
+    die "At least 1 GiB of free disk space is required; only ${available_kib} KiB is available"
 
-cloudflared_runtime_check() {
-  local address
-  address=$(docker inspect "$CLOUDFLARED_CONTAINER" \
-    --format "{{with index .NetworkSettings.Networks \"$CLOUDFLARED_NETWORK\"}}{{.IPAddress}}{{end}}") \
-    || die "cannot inspect $CLOUDFLARED_CONTAINER"
-  [[ -n $address ]] || die "$CLOUDFLARED_CONTAINER is not attached to configured network $CLOUDFLARED_NETWORK"
-  CLOUD_CIDR=$CLOUDFLARED_PROXY_CIDR ADDRESS=$address python3 - <<'PY'
-import ipaddress, os
-network = ipaddress.ip_network(os.environ["CLOUD_CIDR"], strict=False)
-address = ipaddress.ip_address(os.environ["ADDRESS"])
-if network.prefixlen != 32 or address != network.network_address:
-    raise SystemExit("ERROR: configured Cloudflared /32 is not its exact current IP on the configured network")
-print("PASS: exact Cloudflared container/network/IP matches the real-IP trust /32")
-PY
-}
+docker inspect "$CONTAINER" >/dev/null 2>&1 || die "Container does not exist: $CONTAINER"
+[[ "$(docker inspect "$CONTAINER" --format '{{.State.Running}}')" == "true" ]] ||
+    die "Container is not running: $CONTAINER"
 
-docker_network_overlap_check() {
-  local subnets
-  subnets=$(docker network inspect $(docker network ls -q) \
-    --format '{{.Name}}{{range .IPAM.Config}} {{.Subnet}}{{end}}' 2>/dev/null || true)
-  TARGET_SUBNET=$SUPPORT_SESSION_SUBNET NETWORKS=$subnets python3 - <<'PY'
-import ipaddress, os
-target = ipaddress.ip_network(os.environ["TARGET_SUBNET"], strict=True)
-for line in os.environ.get("NETWORKS", "").splitlines():
-    fields = line.split()
-    if not fields or fields[0] == "support-portal_support-session":
-        continue
-    for value in fields[1:]:
-        try: current = ipaddress.ip_network(value, strict=False)
-        except ValueError: continue
-        if target.overlaps(current):
-            raise SystemExit(f"ERROR: support-session subnet overlaps Docker network {fields[0]} ({current})")
-print("PASS: dedicated support-session subnet does not overlap existing Docker networks")
-PY
-}
+mounts="$(docker inspect "$CONTAINER" --format '{{range .Mounts}}{{println .Source "|" .Destination}}{{end}}')"
+grep -Fq "${LIVE_ROOT} | /usr/share/nginx/html" <<< "$mounts" ||
+    die "Container site bind mount does not match $LIVE_ROOT"
+grep -Fq "${NGINX_CONFIG} | /etc/nginx/conf.d/default.conf" <<< "$mounts" ||
+    die "Container Nginx bind mount does not match $NGINX_CONFIG"
 
-python_preflight() {
-  [[ -n $RELEASE_DIR && -n $RUSTDESK_DIR ]] || die '--release-dir and --rustdesk-dir are required'
-  python3 "$SCRIPT_DIR/preflight.py" validate \
-    --project-root "$PROJECT_ROOT" \
-    --release-dir "$RELEASE_DIR" \
-    --rustdesk-dir "$RUSTDESK_DIR" \
-    --deployment-env "$DEPLOYMENT_ENV" \
-    --session-env "$SESSION_ENV" \
-    --private-key "$PRIVATE_KEY"
-}
+WORK_ROOT="$(mktemp -d "${APP_ROOT}/.support-portal-v2.1.0.XXXXXX")"
+EXTRACT_ROOT="${WORK_ROOT}/source"
+STAGE_SITE="${WORK_ROOT}/site"
+VERIFY_ROOT="${WORK_ROOT}/verify"
+install -d -m 0700 "$EXTRACT_ROOT" "$STAGE_SITE" "$VERIFY_ROOT"
 
-pull_and_verify_image() {
-  docker pull "$SUPPORT_API_IMAGE"
-  docker image inspect "$SUPPORT_API_IMAGE" >/dev/null
-  local revision version
-  revision=$(docker image inspect "$SUPPORT_API_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
-  version=$(docker image inspect "$SUPPORT_API_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
-  [[ $revision == "$REVIEWED_SOURCE_COMMIT" ]] || die 'API image revision label does not match reviewed source/release commit'
-  [[ $version == 2.0.0 ]] || die 'API image version label is not 2.0.0'
-  pass "immutable support API image is locally available: $SUPPORT_API_IMAGE"
-}
-
-render_and_test_compose() {
-  local release_path=$1
-  SUPPORT_RELEASE_CURRENT=$release_path compose config --quiet
-  SUPPORT_RELEASE_CURRENT=$release_path compose config > /dev/null
-  pass 'base Compose plus production overlay renders successfully'
-}
-
-test_nginx_config() {
-  local config=$1 portal_image
-  portal_image=$(docker inspect sinbar-support-portal --format '{{.Image}}') \
-    || die 'existing sinbar-support-portal container is required'
-  docker run --rm --network none --add-host support-session-api:127.0.0.1 \
-    --read-only --tmpfs /var/cache/nginx --tmpfs /var/run \
-    --volume "$config:/etc/nginx/conf.d/default.conf:ro" \
-    --entrypoint nginx "$portal_image" -t
-  pass 'new Nginx configuration passed nginx -t before portal recreation'
-}
-
-wait_healthy() {
-  local container=$1 health=missing attempt
-  for attempt in $(seq 1 36); do
-    health=$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' 2>/dev/null || true)
-    [[ $health == healthy ]] && { pass "$container is healthy"; return; }
-    [[ $health == unhealthy ]] && break
-    sleep 5
-  done
-  docker inspect "$container" --format '{{range .State.Health.Log}}{{println .End "exit=" .ExitCode .Output}}{{end}}' 2>/dev/null || true
-  die "$container did not become healthy (status=$health)"
-}
-
-http_code() {
-  curl --max-time 20 --silent --show-error --location --output /dev/null \
-    --write-out '%{http_code}' "$1"
-}
-
-smoke_origin() {
-  local origin=$1 public_label=$2 path expected
-  for path in / /assets/sinbar-primary-logo.jpg /download/manifest.json \
-    /download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe \
-    /download/v2.0.0/macos/Sinbar-Support-Assistant.pkg; do
-    expected=$(http_code "$origin$path?deploy-smoke=$(date +%s)")
-    [[ $expected == 200 ]] || die "$public_label smoke failed for $path (HTTP $expected)"
-  done
-  pass "$public_label page, logo, manifest, and both installers return HTTP 200"
-}
-
-verify_local_download_hashes() {
-  local root=$1 target expected actual platform architecture name suffix
-  for target in windows:x86_64 windows:arm64 macos:x86_64 macos:arm64; do
-    platform=${target%%:*}; architecture=${target##*:}
-    case $target in
-      windows:x86_64) name=rustdesk-1.4.9-x86_64.msi; expected=c87d2f4cef2a5acd6003b6507dcfbf5d5168a256db082cd90b54d35193224aaa ;;
-      windows:arm64) name=rustdesk-1.4.9-aarch64.msi; expected=30bc8925e62c7ade52371758c2b944036ed2386f6c554e9e59f3bcfef06c7cd9 ;;
-      macos:x86_64) name=rustdesk-1.4.9-x86_64.dmg; expected=fa1129a0635019f9c5841937942cc2b08be028a192f47c009edde7e53812904e ;;
-      macos:arm64) name=rustdesk-1.4.9-aarch64.dmg; expected=f7935597b247d42c8f2a2ed71176a9f5868018cd9e1a33b8096418a668c8caf0 ;;
-    esac
-    actual=$(curl --fail --max-time 120 --silent --show-error \
-      "$root/download/vendor/rustdesk/1.4.9/$platform/$name" | sha256sum | awk '{print $1}')
-    [[ $actual == "$expected" ]] || die "served RustDesk hash mismatch for $target"
-  done
-  pass 'all four locally served RustDesk mirrors match pinned SHA-256 values'
-}
-
-smoke_session_api() {
-  local response
-  response=$(curl --fail --max-time 15 --silent --show-error \
-    --header 'Content-Type: application/json' \
-    --header "Origin: $PUBLIC_ORIGIN" \
-    --data '{"platform":"windows","architecture":"unknown"}' \
-    "$LOCAL_ORIGIN/api/v1/support/sessions")
-  RESPONSE=$response python3 - <<'PY'
-import datetime as dt, json, os, re
-body=json.loads(os.environ["RESPONSE"])
-if set(body) != {"protocolUrl","expiresAt","installerUrl"}: raise SystemExit("ERROR: issue response schema mismatch")
-if not re.fullmatch(r"sinbarsupport://start[?]token=[A-Za-z0-9_-]{43}", body["protocolUrl"]): raise SystemExit("ERROR: protocol URL mismatch")
-if body["installerUrl"] != "/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe": raise SystemExit("ERROR: installer URL mismatch")
-expires=dt.datetime.strptime(body["expiresAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
-remaining=(expires-dt.datetime.now(dt.timezone.utc)).total_seconds()
-if not 1 <= remaining <= 120: raise SystemExit("ERROR: issued session lifetime mismatch")
-print("PASS: same-origin session issue API returned a 43-character, <=120-second launch URL")
-PY
-}
-
-write_backup() {
-  local stamp=$1 backup=$2 item
-  install -d -m 0700 "$backup"
-  {
-    printf 'schemaVersion=1\n'
-    printf 'stamp=%s\n' "$stamp"
-    if [[ -L $APP_ROOT/current ]]; then
-      printf 'previousCurrentType=symlink\npreviousCurrentTarget=%s\n' "$(readlink "$APP_ROOT/current")"
-    elif [[ -e $APP_ROOT/current ]]; then
-      die "$APP_ROOT/current exists but is not a symlink"
+if [[ -d "$SOURCE_INPUT" ]]; then
+    if [[ -f "${SOURCE_INPUT}/portal/index.html" ]]; then
+        REPO_ROOT="$(readlink -f -- "$SOURCE_INPUT")"
     else
-      printf 'previousCurrentType=missing\npreviousCurrentTarget=\n'
+        die "Source directory is not a repository root containing portal/index.html: $SOURCE_INPUT"
     fi
-    [[ -f $APP_ROOT/compose.assistant.yaml ]] && printf 'previousOverlay=present\n' || printf 'previousOverlay=missing\n'
-  } > "$backup/state.env"
-  chmod 0600 "$backup/state.env"
+else
+    case "$SOURCE_INPUT" in
+        *.zip)
+            unzip -q -- "$SOURCE_INPUT" -d "$EXTRACT_ROOT"
+            ;;
+        *.tar.gz|*.tgz)
+            tar -xzf "$SOURCE_INPUT" -C "$EXTRACT_ROOT"
+            ;;
+        *)
+            die "Portal source must be a repository directory, .zip, .tar.gz, or .tgz"
+            ;;
+    esac
 
-  local -a entries=(compose.yaml nginx.conf site)
-  [[ -e $APP_ROOT/current || -L $APP_ROOT/current ]] && entries+=(current)
-  [[ -e $APP_ROOT/compose.assistant.yaml ]] && entries+=(compose.assistant.yaml)
-  [[ -e $APP_ROOT/nginx.intel-style.conf ]] && entries+=(nginx.intel-style.conf)
-  tar --directory "$APP_ROOT" --create --gzip --file "$backup/live-state.tar.gz" -- "${entries[@]}"
-  chmod 0600 "$backup/live-state.tar.gz"
-  (cd "$backup" && sha256sum live-state.tar.gz state.env > SHA256SUMS && chmod 0600 SHA256SUMS && sha256sum --check SHA256SUMS)
-  pass "recoverable pre-deployment backup created: $backup"
+    mapfile -d '' -t repo_candidates < <(
+        find "$EXTRACT_ROOT" -type f -path '*/portal/index.html' -print0
+    )
+    (( ${#repo_candidates[@]} == 1 )) ||
+        die "Expected one repository root in the source archive; found ${#repo_candidates[@]}"
+    REPO_ROOT="${repo_candidates[0]%/portal/index.html}"
+fi
+
+log INFO "Validating reviewed portal source at $REPO_ROOT"
+verify_source_file "portal/index.html" "$PORTAL_INDEX_SHA256" "portal/index.html"
+verify_source_file "portal/assets/app.js" "$PORTAL_APP_SHA256" "portal/assets/app.js"
+verify_source_file "portal/assets/styles.css" "$PORTAL_CSS_SHA256" "portal/assets/styles.css"
+verify_source_file "portal/download/manifest.json" "$PORTAL_MANIFEST_SHA256" "portal/download/manifest.json"
+verify_source_file "portal/download/SHA256SUMS.txt" "$PORTAL_CHECKSUMS_SHA256" "portal/download/SHA256SUMS.txt"
+verify_source_file "deploy/nginx.conf" "$PORTAL_NGINX_SHA256" "deploy/nginx.conf"
+
+logo_source="${REPO_ROOT}/portal/assets/sinbar-primary-logo.jpg"
+if [[ ! -f "$logo_source" ]]; then
+    log WARN "Source archive has no logo; using the existing verified live Sinbar logo"
+    logo_source="${LIVE_ROOT}/assets/sinbar-primary-logo.jpg"
+fi
+verify_file "$logo_source" "6486" "$PORTAL_LOGO_SHA256" "Sinbar primary logo"
+
+PORTAL_ROOT="${REPO_ROOT}/portal" python3 - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["PORTAL_ROOT"])
+manifest = json.loads((root / "download/manifest.json").read_text(encoding="utf-8"))
+
+assert manifest["schemaVersion"] == 3
+assert manifest["portalVersion"] == "2.1.0"
+assert manifest["experience"] == "vendor-signed-rustdesk-download"
+assert manifest["supportMode"] == "attended"
+assert manifest["permanentPasswordConfigured"] is False
+assert manifest["supportServer"]["host"] == "remote.sinbarconsultants.net"
+assert manifest["supportServer"]["relay"] == "remote.sinbarconsultants.net"
+assert manifest["supportServer"]["apiConfigured"] is False
+assert manifest["supportServer"]["publicKeySha256"] == "2f9f17cd56abc92fe53c75aafb97184841f5c4030d39f06164c47f1e0b2cd6aa"
+assert manifest["upstream"]["project"] == "RustDesk"
+assert manifest["upstream"]["version"] == "1.4.9"
+assert manifest["security"]["customBinaryBuiltBySinbar"] is False
+assert manifest["security"]["upstreamBytesModified"] is False
+assert manifest["security"]["secretsEmbedded"] is False
+
+expected = {
+    ("windows", "x86_64"): (24472432, "eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274"),
+    ("windows", "arm64"): (22318960, "c717bf52fdd601c58419e46c503176dd87187d174ebf8b3b5854ca381e8e9145"),
+    ("macos", "x86_64"): (32503998, "fa1129a0635019f9c5841937942cc2b08be028a192f47c009edde7e53812904e"),
+    ("macos", "arm64"): (25906851, "f7935597b247d42c8f2a2ed71176a9f5868018cd9e1a33b8096418a668c8caf0"),
 }
 
-rollback_from_backup() {
-  local backup=$1 previous_overlay previous_type previous_target
-  [[ -d $backup && ! -L $backup ]] || die "invalid backup directory: $backup"
-  (cd "$backup" && sha256sum --check SHA256SUMS) || die 'backup checksum verification failed'
-  previous_overlay=$(awk -F= '$1=="previousOverlay"{print $2}' "$backup/state.env")
-  previous_type=$(awk -F= '$1=="previousCurrentType"{print $2}' "$backup/state.env")
-  previous_target=$(awk -F= '$1=="previousCurrentTarget"{sub(/^[^=]*=/,""); print}' "$backup/state.env")
+packages = {(p["platform"], p["architecture"]): p for p in manifest["packages"]}
+assert set(packages) == set(expected)
+for key, (size, digest) in expected.items():
+    package = packages[key]
+    assert package["sha256"] == digest
+    if "bytes" in package:
+        assert package["bytes"] == size
 
-  rm -f -- "$APP_ROOT/current" "$APP_ROOT/compose.assistant.yaml" "$APP_ROOT/nginx.intel-style.conf"
-  tar --directory "$APP_ROOT" --extract --gzip --file "$backup/live-state.tar.gz"
-  if [[ $previous_type == missing ]]; then rm -f -- "$APP_ROOT/current"; fi
+print("PASS: portal manifest contract verified")
+PY
 
-  if [[ $previous_overlay == present ]]; then
-    load_deployment_env
-    compose up -d --no-build --pull never
-  else
-    base_compose up -d --no-deps --force-recreate support-portal
-    docker rm --force sinbar-support-session-api >/dev/null 2>&1 || true
-  fi
-  pass "rollback restored pre-deployment state from $backup"
-}
+grep -Fq "$SERVER_HOST" "${REPO_ROOT}/portal/assets/app.js" ||
+    die "Portal application does not contain the approved RustDesk host"
+grep -Fq "$COMPACT_CONFIG_TOKEN" "${REPO_ROOT}/deploy/nginx.conf" ||
+    die "Nginx configuration does not contain the approved compact RustDesk token"
+grep -Fq "$WINDOWS_X64_DOWNLOAD_NAME" "${REPO_ROOT}/deploy/nginx.conf" ||
+    die "Nginx Windows x64 Content-Disposition is not the approved filename"
+grep -Fq "$WINDOWS_ARM64_DOWNLOAD_NAME" "${REPO_ROOT}/deploy/nginx.conf" ||
+    die "Nginx Windows ARM64 Content-Disposition is not the approved filename"
 
-status() {
-  require_tools
-  printf 'Sinbar Support Assistant deployment status\n\n'
-  if [[ -L $APP_ROOT/current ]]; then
-    printf 'current_release=%s\n' "$(readlink -f "$APP_ROOT/current")"
-    [[ -f $APP_ROOT/current/DEPLOYED_RELEASE.json ]] && python3 -m json.tool "$APP_ROOT/current/DEPLOYED_RELEASE.json"
-  else
-    printf 'current_release=not-deployed\n'
-  fi
-  docker ps --filter name=sinbar-support-portal --filter name=sinbar-support-session-api \
-    --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-  printf 'local_http=%s\n' "$(http_code "$LOCAL_ORIGIN/" || true)"
-  printf 'public_https=%s\n' "$(http_code "$PUBLIC_ORIGIN/" || true)"
-}
+install -d -m 0755 \
+    "${STAGE_SITE}/assets" \
+    "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows" \
+    "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos"
 
-preflight() {
-  require_root; require_tools; python_preflight; load_deployment_env
-  cloudflared_runtime_check
-  docker_network_overlap_check
-  pull_and_verify_image
-  local temp
-  temp=$(mktemp -d "$APP_ROOT/.preflight.XXXXXX")
-  python3 "$SCRIPT_DIR/preflight.py" stage --project-root "$PROJECT_ROOT" \
-    --release-dir "$RELEASE_DIR" --rustdesk-dir "$RUSTDESK_DIR" \
-    --deployment-env "$DEPLOYMENT_ENV" --session-env "$SESSION_ENV" \
-    --private-key "$PRIVATE_KEY" --stage-root "$temp/release"
-  render_and_test_compose "$temp/release"
-  test_nginx_config "$temp/release/nginx.conf"
-  rm -rf -- "$temp"
-  pass 'all production preflight gates passed; no live files or containers were changed'
-}
+install -m 0644 "${REPO_ROOT}/portal/index.html" "${STAGE_SITE}/index.html"
+install -m 0644 "${REPO_ROOT}/portal/assets/app.js" "${STAGE_SITE}/assets/app.js"
+install -m 0644 "${REPO_ROOT}/portal/assets/styles.css" "${STAGE_SITE}/assets/styles.css"
+install -m 0644 "$logo_source" "${STAGE_SITE}/assets/sinbar-primary-logo.jpg"
+install -m 0644 "${REPO_ROOT}/portal/download/manifest.json" "${STAGE_SITE}/download/manifest.json"
+install -m 0644 "${REPO_ROOT}/portal/download/SHA256SUMS.txt" "${STAGE_SITE}/download/SHA256SUMS.txt"
 
-deploy() {
-  require_root; require_tools
-  exec 9>"$LOCK_FILE"
-  flock -n 9 || die 'another support deployment is running'
-  python_preflight; load_deployment_env; cloudflared_runtime_check; docker_network_overlap_check
-  pull_and_verify_image
+download_official \
+    "${RUSTDESK_RELEASE_BASE}/${WIN_X64_FILE}" \
+    "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows/${WIN_X64_FILE}" \
+    "$WIN_X64_BYTES" "$WIN_X64_SHA256" "RustDesk Windows x64"
 
-  local stamp stage release_path backup state_changed=0 completed=0
-  stamp=$(date -u +%Y%m%dT%H%M%SZ)
-  stage=$(mktemp -d "$APP_ROOT/.deploy-v2.0.0.XXXXXX")
-  release_path="$APP_ROOT/releases/2.0.0-$stamp"
-  backup="$BACKUP_ROOT/${stamp}-pre-v2.0.0"
+download_official \
+    "${RUSTDESK_RELEASE_BASE}/${WIN_ARM64_FILE}" \
+    "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows/${WIN_ARM64_FILE}" \
+    "$WIN_ARM64_BYTES" "$WIN_ARM64_SHA256" "RustDesk Windows ARM64"
 
-  cleanup() {
-    local rc=$?
-    if [[ $completed -ne 1 && $state_changed -eq 1 ]]; then
-      printf 'ERROR: deployment failed; automatic rollback starting\n' >&2
-      rollback_from_backup "$backup" || printf 'CRITICAL: automatic rollback failed; inspect %s\n' "$backup" >&2
+download_official \
+    "${RUSTDESK_RELEASE_BASE}/${MAC_X64_FILE}" \
+    "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos/${MAC_X64_FILE}" \
+    "$MAC_X64_BYTES" "$MAC_X64_SHA256" "RustDesk macOS Intel"
+
+download_official \
+    "${RUSTDESK_RELEASE_BASE}/${MAC_ARM64_FILE}" \
+    "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos/${MAC_ARM64_FILE}" \
+    "$MAC_ARM64_BYTES" "$MAC_ARM64_SHA256" "RustDesk macOS Apple silicon"
+
+(
+    cd "${STAGE_SITE}/download"
+    sha256sum -c SHA256SUMS.txt
+)
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_DIR="${BACKUP_ROOT}/${stamp}"
+BACKUP_ARCHIVE="${BACKUP_DIR}/pre-v2.1.0-live-state.tar.gz"
+install -d -o root -g root -m 0700 "$BACKUP_DIR"
+
+tar -C "$APP_ROOT" -czf "$BACKUP_ARCHIVE" \
+    support-portal/site \
+    support-portal/nginx.conf
+
+(
+    cd "$BACKUP_DIR"
+    sha256sum "${BACKUP_ARCHIVE##*/}" > SHA256SUMS
+    chmod 0600 "${BACKUP_ARCHIVE##*/}" SHA256SUMS
+    sha256sum -c SHA256SUMS
+)
+log PASS "Pre-deployment backup verified: $BACKUP_ARCHIVE"
+
+DEPLOY_APPLIED=1
+
+install -d -o root -g root -m 0755 \
+    "${LIVE_ROOT}/assets" \
+    "${LIVE_ROOT}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows" \
+    "${LIVE_ROOT}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos"
+
+# Install payloads and support assets first. Publish index.html last.
+atomic_install "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows/${WIN_X64_FILE}" \
+    "${LIVE_ROOT}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows/${WIN_X64_FILE}"
+atomic_install "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows/${WIN_ARM64_FILE}" \
+    "${LIVE_ROOT}/download/vendor/rustdesk/${RUSTDESK_VERSION}/windows/${WIN_ARM64_FILE}"
+atomic_install "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos/${MAC_X64_FILE}" \
+    "${LIVE_ROOT}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos/${MAC_X64_FILE}"
+atomic_install "${STAGE_SITE}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos/${MAC_ARM64_FILE}" \
+    "${LIVE_ROOT}/download/vendor/rustdesk/${RUSTDESK_VERSION}/macos/${MAC_ARM64_FILE}"
+atomic_install "${STAGE_SITE}/download/SHA256SUMS.txt" "${LIVE_ROOT}/download/SHA256SUMS.txt"
+atomic_install "${STAGE_SITE}/download/manifest.json" "${LIVE_ROOT}/download/manifest.json"
+atomic_install "${STAGE_SITE}/assets/sinbar-primary-logo.jpg" "${LIVE_ROOT}/assets/sinbar-primary-logo.jpg"
+atomic_install "${STAGE_SITE}/assets/styles.css" "${LIVE_ROOT}/assets/styles.css"
+atomic_install "${STAGE_SITE}/assets/app.js" "${LIVE_ROOT}/assets/app.js"
+
+# nginx.conf is a direct file bind mount. Overwrite the existing inode so the
+# running container sees the new bytes before nginx -t; do not replace it by mv.
+install -o root -g root -m 0644 "${REPO_ROOT}/deploy/nginx.conf" "${WORK_ROOT}/nginx.conf"
+cp --preserve=mode,ownership,timestamps -- "${WORK_ROOT}/nginx.conf" "$NGINX_CONFIG"
+
+docker exec "$CONTAINER" nginx -t
+atomic_install "${STAGE_SITE}/index.html" "${LIVE_ROOT}/index.html"
+docker exec "$CONTAINER" nginx -s reload
+
+for attempt in $(seq 1 30); do
+    if curl --max-time 5 --silent --show-error --fail "${LOCAL_BASE}/health" >/dev/null; then
+        break
     fi
-    [[ -d $stage ]] && rm -rf -- "$stage"
-    exit "$rc"
-  }
-  trap cleanup EXIT
+    (( attempt < 30 )) || die "Portal health endpoint did not recover after Nginx reload"
+    sleep 2
+done
 
-  python3 "$SCRIPT_DIR/preflight.py" stage --project-root "$PROJECT_ROOT" \
-    --release-dir "$RELEASE_DIR" --rustdesk-dir "$RUSTDESK_DIR" \
-    --deployment-env "$DEPLOYMENT_ENV" --session-env "$SESSION_ENV" \
-    --private-key "$PRIVATE_KEY" --stage-root "$stage/release"
-  render_and_test_compose "$stage/release"
-  test_nginx_config "$stage/release/nginx.conf"
-  write_backup "$stamp" "$backup"
+verify_portal_endpoint "$LOCAL_BASE" "local"
+verify_portal_endpoint "$PUBLIC_BASE" "public"
 
-  install -d -m 0755 "$APP_ROOT/releases"
-  install -d -o 10001 -g 10001 -m 0700 "$APP_ROOT/support-session-data"
-  mv -- "$stage/release" "$release_path"
-  install -o root -g root -m 0644 "$release_path/compose.assistant.yaml" "$APP_ROOT/compose.assistant.yaml.new"
-  mv -f -- "$APP_ROOT/compose.assistant.yaml.new" "$APP_ROOT/compose.assistant.yaml"
-  ln -s -- "releases/${release_path##*/}" "$APP_ROOT/current.new"
-  mv -Tf -- "$APP_ROOT/current.new" "$APP_ROOT/current"
-  state_changed=1
+# Confirm the exact live source files still match what was reviewed.
+[[ "$(sha256_of "${LIVE_ROOT}/index.html")" == "$PORTAL_INDEX_SHA256" ]] || die "Live index.html drifted"
+[[ "$(sha256_of "${LIVE_ROOT}/assets/app.js")" == "$PORTAL_APP_SHA256" ]] || die "Live app.js drifted"
+[[ "$(sha256_of "${LIVE_ROOT}/assets/styles.css")" == "$PORTAL_CSS_SHA256" ]] || die "Live styles.css drifted"
+[[ "$(sha256_of "${LIVE_ROOT}/download/manifest.json")" == "$PORTAL_MANIFEST_SHA256" ]] || die "Live manifest drifted"
+[[ "$(sha256_of "$NGINX_CONFIG")" == "$PORTAL_NGINX_SHA256" ]] || die "Live Nginx configuration drifted"
 
-  compose up -d --no-deps --no-build --pull never support-session-api
-  wait_healthy sinbar-support-session-api
-  compose up -d --no-deps --force-recreate --no-build --pull never support-portal
-  wait_healthy sinbar-support-portal
-  cloudflared_runtime_check
-  smoke_origin "$LOCAL_ORIGIN" 'local portal'
-  verify_local_download_hashes "$LOCAL_ORIGIN"
-  smoke_session_api
-  smoke_origin "$PUBLIC_ORIGIN" 'public portal'
+DEPLOY_COMPLETE=1
 
-  completed=1
-  trap - EXIT
-  rm -rf -- "$stage"
-  pass "Sinbar Support Assistant $VERSION deployed successfully"
-  printf 'release=%s\nbackup=%s\n' "$release_path" "$backup"
-}
-
-case $COMMAND in
-  status) status ;;
-  preflight) preflight ;;
-  deploy) deploy ;;
-  rollback)
-    require_root; require_tools
-    [[ -n $ROLLBACK_BACKUP ]] || die '--backup is required for rollback'
-    exec 9>"$LOCK_FILE"; flock -n 9 || die 'another support deployment is running'
-    rollback_from_backup "$ROLLBACK_BACKUP"
-    ;;
-  help) usage ;;
-  *) usage; exit 2 ;;
-esac
+log PASS "Sinbar Remote Support portal v2.1.0 deployed and fully verified"
+log INFO "Public portal: ${PUBLIC_BASE}/"
+log INFO "Rollback backup: ${BACKUP_ARCHIVE}"
+log INFO "No private GitHub token, signing key, permanent password, or unattended-access credential was used"
