@@ -46,6 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash -n deploy/sinbar-support-deploy
           python3 portal/tests/validate_portal.py
           python3 -m json.tool portal/download/manifest.json >/dev/null
 
