@@ -1,330 +1,269 @@
-name: Sinbar Support signed release
+name: Sinbar Support verified portable release
 
 on:
   pull_request:
     paths:
-      - 'windows/**'
-      - 'macos/**'
       - 'portal/**'
-      - 'server/**'
-      - 'deploy/**'
-      - 'tests/**'
-      - 'release/**'
+      - 'deploy/nginx.conf'
       - '.github/workflows/sinbar-support-release.yml'
   push:
     branches:
       - main
-    tags:
-      - 'v*'
     paths:
-      - 'windows/**'
-      - 'macos/**'
       - 'portal/**'
-      - 'server/**'
-      - 'deploy/**'
-      - 'tests/**'
-      - 'release/**'
+      - 'deploy/nginx.conf'
       - '.github/workflows/sinbar-support-release.yml'
   workflow_dispatch:
 
 concurrency:
-  group: sinbar-support-release-${{ github.ref }}
-  cancel-in-progress: false
+  group: sinbar-support-vendor-release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 env:
-  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
-  DOTNET_NOLOGO: '1'
+  RUSTDESK_VERSION: '1.4.9'
+  RUSTDESK_RELEASE_BASE: 'https://github.com/rustdesk/rustdesk/releases/download/1.4.9'
+  RUSTDESK_WINDOWS_X86_64_SHA256: 'eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274'
+  RUSTDESK_WINDOWS_ARM64_SHA256: 'c717bf52fdd601c58419e46c503176dd87187d174ebf8b3b5854ca381e8e9145'
+  RUSTDESK_MACOS_X86_64_SHA256: 'fa1129a0635019f9c5841937942cc2b08be028a192f47c009edde7e53812904e'
+  RUSTDESK_MACOS_ARM64_SHA256: 'f7935597b247d42c8f2a2ed71176a9f5868018cd9e1a33b8096418a668c8caf0'
+  RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256: '85a1152301ba31d625ce06294584deaee9cf32c2dd7bdfdf72821499cd745116'
 
 jobs:
   validate-contract:
-    name: Validate cross-platform release contract
-    runs-on: ubuntu-latest
+    name: Validate direct-vendor release contract
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      MANIFEST_KEY_ID: ${{ vars.MANIFEST_KEY_ID }}
     steps:
-      - name: Check out the reviewed source
+      - name: Check out reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Validate names, versions, paths, and fixed RustDesk release
+      - name: Validate portal, deployment, and locked vendor contract
         shell: bash
         run: |
           set -euo pipefail
-          tag=''
-          if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
-            tag="$GITHUB_REF_NAME"
-          fi
-          python3 release/scripts/validate_release_contract.py \
-            --repository-root "$GITHUB_WORKSPACE" \
-            --tag "$tag" \
-            --manifest-key-id "$MANIFEST_KEY_ID"
-          python3 tests/validate_integration.py
-          python3 windows/tests/linux/validate_source.py
-          bash macos/tests/run-linux-tests.sh
           python3 portal/tests/validate_portal.py
-          python3 -m py_compile deploy/preflight.py
-          python3 -m json.tool deploy/attended-acceptance.example.json >/dev/null
-          bash -n deploy/sinbar-support-deploy deploy/verify-macos-release.sh
+          python3 -m json.tool portal/download/manifest.json >/dev/null
 
-      - name: Run Support Session API tests from hash-locked dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/server-test-venv"
-          "$RUNNER_TEMP/server-test-venv/bin/python" -m pip install \
-            --disable-pip-version-check \
-            --require-hashes \
-            --requirement release/server-test-requirements.lock
-          PYTHONPATH=server \
-            "$RUNNER_TEMP/server-test-venv/bin/python" -m pytest -q server/tests
-
-  validate-windows:
-    name: Validate Windows source
+  verify-windows-vendor:
+    name: Verify RustDesk Windows vendor signatures
     needs: validate-contract
-    runs-on: windows-latest
-    timeout-minutes: 15
-    env:
-      MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL: ${{ vars.MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL }}
-      RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256: ${{ vars.RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 }}
-    steps:
-      - name: Check out the reviewed source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Run Windows contract tests
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace($env:MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL)) {
-            throw 'Repository variable MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL is required.'
-          }
-          if ($env:RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 -notmatch '^[A-Fa-f0-9]{64}$') {
-            throw 'Repository variable RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 must be a verified 64-hex SPKI SHA-256 pin.'
-          }
-          if (-not (dotnet --list-sdks | Select-String -Pattern '^8\.')) {
-            throw '.NET 8 SDK is required on the Windows release runner.'
-          }
-          dotnet run `
-            --project windows/tests/ContractTests/ContractTests.csproj `
-            --configuration Release `
-            -p:ManifestPublicKeyX963Base64Url=$env:MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL `
-            -p:RustDeskPublisherSpkiSha256=$env:RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Windows contract tests failed.'
-          }
-
-  validate-macos:
-    name: Validate macOS source
-    needs: validate-contract
-    runs-on: macos-latest
+    runs-on: windows-2025
     timeout-minutes: 20
     steps:
-      - name: Check out the reviewed source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Compile and test both Swift products
-        shell: bash
-        run: |
-          set -euo pipefail
-          swift --version
-          swift test --package-path macos
-
-  release-windows:
-    name: Build and Authenticode-sign Windows
-    needs:
-      - validate-contract
-      - validate-windows
-      - validate-macos
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-    runs-on: windows-latest
-    timeout-minutes: 30
-    environment: windows-signing
-    env:
-      WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
-      WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
-      WINDOWS_CERT_THUMBPRINT: ${{ vars.WINDOWS_CERT_THUMBPRINT }}
-      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
-      MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL: ${{ vars.MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL }}
-      RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256: ${{ vars.RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256 }}
-    steps:
-      - name: Check out the exact release tag
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Build, sign, timestamp, and independently verify
+      - name: Download exact portable executables and verify SHA-256, Authenticode, publisher, and SPKI
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & release/scripts/Build-SignedWindowsRelease.ps1 `
-            -RepositoryRoot $env:GITHUB_WORKSPACE `
-            -OutputDirectory (Join-Path $env:RUNNER_TEMP 'release-windows')
+          Set-StrictMode -Version Latest
 
-      - name: Upload verified Windows artifact
+          $output = Join-Path $env:RUNNER_TEMP 'verified-windows'
+          New-Item -ItemType Directory -Path $output | Out-Null
+
+          $signTool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $signTool) {
+            throw 'signtool.exe was not found on the GitHub-hosted runner.'
+          }
+
+          $assets = @(
+            [ordered]@{
+              architecture = 'x86_64'
+              name = 'rustdesk-1.4.9-x86_64.exe'
+              bytes = 24472432
+              sha256 = $env:RUSTDESK_WINDOWS_X86_64_SHA256
+            },
+            [ordered]@{
+              architecture = 'arm64'
+              name = 'rustdesk-1.4.9-aarch64.exe'
+              bytes = 22318960
+              sha256 = $env:RUSTDESK_WINDOWS_ARM64_SHA256
+            }
+          )
+
+          $rows = @(
+            foreach ($asset in $assets) {
+              $path = Join-Path $output $asset.name
+              $url = "$env:RUSTDESK_RELEASE_BASE/$($asset.name)"
+              Invoke-WebRequest -Uri $url -OutFile $path -MaximumRedirection 5
+
+              if ((Get-Item -LiteralPath $path).Length -ne $asset.bytes) {
+                throw "Unexpected byte count for $($asset.name)."
+              }
+              $digest = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($digest -cne $asset.sha256) {
+                throw "SHA-256 mismatch for $($asset.name)."
+              }
+
+              & $signTool.FullName verify /pa /all /v $path
+              if ($LASTEXITCODE -ne 0) {
+                throw "SignTool policy verification failed for $($asset.name)."
+              }
+
+              $signature = Get-AuthenticodeSignature -LiteralPath $path
+              if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+                  $null -eq $signature.SignerCertificate) {
+                throw "Authenticode validation failed for $($asset.name): $($signature.Status)."
+              }
+              $subject = $signature.SignerCertificate.Subject
+              if ($subject.IndexOf('PURSLANE', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                throw "Unexpected RustDesk publisher for $($asset.name): $subject"
+              }
+
+              [byte[]]$spki = $signature.SignerCertificate.PublicKey.ExportSubjectPublicKeyInfo()
+              [byte[]]$spkiDigest = [Security.Cryptography.SHA256]::HashData($spki)
+              $pin = [Convert]::ToHexString($spkiDigest).ToLowerInvariant()
+              if ($pin -cne $env:RUSTDESK_WINDOWS_PUBLISHER_SPKI_SHA256) {
+                throw "Publisher SPKI pin mismatch for $($asset.name)."
+              }
+
+              [ordered]@{
+                architecture = $asset.architecture
+                name = $asset.name
+                bytes = $asset.bytes
+                sha256 = $digest
+                authenticodeStatus = 'Valid'
+                publisherSubject = $subject
+                publisherSpkiSha256 = $pin
+                signtoolPolicyVerified = $true
+              }
+            }
+          )
+
+          if (($rows.publisherSpkiSha256 | Select-Object -Unique).Count -ne 1) {
+            throw 'The two Windows packages do not use the same publisher key.'
+          }
+          $receipt = [ordered]@{
+            schemaVersion = 1
+            vendor = 'RustDesk'
+            vendorVersion = $env:RUSTDESK_VERSION
+            verifiedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+            assets = $rows
+          }
+          [IO.File]::WriteAllText(
+            (Join-Path $output 'windows-vendor-verification.json'),
+            (($receipt | ConvertTo-Json -Depth 8) + "`n"),
+            [Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Upload unchanged verified Windows assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: signed-windows
-          path: ${{ runner.temp }}/release-windows/Sinbar-Support-Assistant-Setup.exe
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-
-  release-macos:
-    name: Sign, notarize, and staple macOS
-    needs:
-      - validate-contract
-      - validate-windows
-      - validate-macos
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-    runs-on: macos-latest
-    timeout-minutes: 45
-    environment: macos-signing
-    env:
-      APPLE_APPLICATION_P12_BASE64: ${{ secrets.APPLE_APPLICATION_P12_BASE64 }}
-      APPLE_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_APPLICATION_P12_PASSWORD }}
-      APPLE_INSTALLER_P12_BASE64: ${{ secrets.APPLE_INSTALLER_P12_BASE64 }}
-      APPLE_INSTALLER_P12_PASSWORD: ${{ secrets.APPLE_INSTALLER_P12_PASSWORD }}
-      APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
-      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-      DEVELOPER_ID_APPLICATION: ${{ vars.APPLE_DEVELOPER_ID_APPLICATION }}
-      DEVELOPER_ID_INSTALLER: ${{ vars.APPLE_DEVELOPER_ID_INSTALLER }}
-      SINBAR_TEAM_IDENTIFIER: ${{ vars.APPLE_TEAM_ID }}
-      BUILD_NUMBER: ${{ github.run_number }}
-      MANIFEST_KEY_ID: ${{ vars.MANIFEST_KEY_ID }}
-      MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL: ${{ vars.MANIFEST_P256_PUBLIC_KEY_X963_BASE64URL }}
-      RUSTDESK_BUNDLE_IDENTIFIER: ${{ vars.RUSTDESK_BUNDLE_IDENTIFIER }}
-      RUSTDESK_TEAM_IDENTIFIER: ${{ vars.RUSTDESK_TEAM_IDENTIFIER }}
-      RUSTDESK_X86_64_DMG_SHA256: ${{ vars.RUSTDESK_X86_64_DMG_SHA256 }}
-      RUSTDESK_ARM64_DMG_SHA256: ${{ vars.RUSTDESK_ARM64_DMG_SHA256 }}
-    steps:
-      - name: Check out the exact release tag
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Build, sign, notarize, staple, and independently verify
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash release/scripts/build-signed-macos-release.sh \
-            "$GITHUB_WORKSPACE" \
-            "$RUNNER_TEMP/release-macos"
-
-      - name: Upload verified macOS artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: signed-macos
-          path: ${{ runner.temp }}/release-macos/Sinbar-Support-Assistant.pkg
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-
-  assemble-release:
-    name: Create post-signing release manifest
-    needs:
-      - release-windows
-      - release-macos
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Check out the exact release tag
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download only verified platform artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: signed-*
-          path: ${{ runner.temp }}/release-assets
-          merge-multiple: true
-
-      - name: Generate and verify SHA-256 metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          created_at="$(git show -s --format=%cI "$GITHUB_SHA")"
-          python3 release/scripts/create_release_manifest.py \
-            --assets-dir "$RUNNER_TEMP/release-assets" \
-            --output-dir "$RUNNER_TEMP/release-assets" \
-            --tag "$GITHUB_REF_NAME" \
-            --commit "$GITHUB_SHA" \
-            --created-at "$created_at"
-          cd "$RUNNER_TEMP/release-assets"
-          sha256sum --check SHA256SUMS.txt
-
-      - name: Upload complete release bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-bundle-${{ github.ref_name }}
+          name: verified-windows
           path: |
-            ${{ runner.temp }}/release-assets/Sinbar-Support-Assistant-Setup.exe
-            ${{ runner.temp }}/release-assets/Sinbar-Support-Assistant.pkg
-            ${{ runner.temp }}/release-assets/release-manifest.json
-            ${{ runner.temp }}/release-assets/SHA256SUMS.txt
+            ${{ runner.temp }}/verified-windows/rustdesk-1.4.9-x86_64.exe
+            ${{ runner.temp }}/verified-windows/rustdesk-1.4.9-aarch64.exe
+            ${{ runner.temp }}/verified-windows/windows-vendor-verification.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
           compression-level: 0
 
-  publish-release:
-    name: Upload and publish immutable release candidate
-    needs: assemble-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production-release
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+  verify-macos-vendor:
+    name: Verify RustDesk macOS vendor signatures
+    needs: validate-contract
+    runs-on: macos-15
+    timeout-minutes: 25
     steps:
-      - name: Download complete release bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: release-bundle-${{ github.ref_name }}
-          path: ${{ runner.temp }}/release-bundle
-
-      - name: Reverify and publish without overwriting
+      - name: Download exact DMGs and verify SHA-256, Gatekeeper, bundle ID, and common Team ID
         shell: bash
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/release-bundle"
-          sha256sum --check SHA256SUMS.txt
+          output="$RUNNER_TEMP/verified-macos"
+          rows="$RUNNER_TEMP/macos-verification.tsv"
+          mkdir -p "$output"
+          : > "$rows"
+          current_mount=''
+          cleanup() {
+            if [[ -n "$current_mount" ]]; then
+              hdiutil detach "$current_mount" -force >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo 'ERROR: a release with this tag already exists; refusing to overwrite it' >&2
-            exit 1
-          fi
+          while IFS='|' read -r architecture name expected_bytes expected_hash; do
+            path="$output/$name"
+            curl --fail --location --proto '=https' --tlsv1.2 \
+              --retry 3 --retry-all-errors --connect-timeout 20 --max-time 300 \
+              --output "$path" "$RUSTDESK_RELEASE_BASE/$name"
+            actual_bytes=$(stat -f '%z' "$path")
+            actual_hash=$(shasum -a 256 "$path" | awk '{print $1}')
+            [[ "$actual_bytes" == "$expected_bytes" ]] || { echo "ERROR: byte count mismatch for $name" >&2; exit 1; }
+            [[ "$actual_hash" == "$expected_hash" ]] || { echo "ERROR: SHA-256 mismatch for $name" >&2; exit 1; }
 
-          gh release create "$GITHUB_REF_NAME" \
-            --verify-tag \
-            --draft \
-            --generate-notes \
-            --title "Sinbar Support Assistant ${GITHUB_REF_NAME}" \
-            Sinbar-Support-Assistant-Setup.exe \
-            Sinbar-Support-Assistant.pkg \
-            release-manifest.json \
-            SHA256SUMS.txt
+            current_mount="$RUNNER_TEMP/mount-$architecture"
+            mkdir -p "$current_mount"
+            hdiutil attach -readonly -nobrowse -mountpoint "$current_mount" "$path" >/dev/null
+            app="$current_mount/RustDesk.app"
+            [[ -d "$app" && ! -L "$app" ]] || { echo "ERROR: RustDesk.app missing from $name" >&2; exit 1; }
+            hdiutil verify "$path"
+            xcrun stapler validate "$path"
+            codesign --verify --deep --strict --all-architectures --verbose=4 "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+            details=$(codesign -dv --verbose=4 "$app" 2>&1)
+            identifier=$(sed -n 's/^Identifier=//p' <<<"$details" | head -n1)
+            version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+            [[ "$version" == '1.4.9' ]] || { echo "ERROR: app version mismatch for $name" >&2; exit 1; }
+            team_id=$(sed -n 's/^TeamIdentifier=//p' <<<"$details" | head -n1)
+            [[ "$identifier" == 'com.carriez.rustdesk' ]] || { echo "ERROR: bundle identifier mismatch for $name" >&2; exit 1; }
+            [[ "$team_id" =~ ^[A-Z0-9]{10}$ ]] || { echo "ERROR: invalid Team ID for $name" >&2; exit 1; }
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$architecture" "$name" "$actual_bytes" "$actual_hash" "$identifier" "$team_id" >> "$rows"
+            hdiutil detach "$current_mount" >/dev/null
+            current_mount=''
+          done <<EOF
+          x86_64|rustdesk-1.4.9-x86_64.dmg|32503998|$RUSTDESK_MACOS_X86_64_SHA256
+          arm64|rustdesk-1.4.9-aarch64.dmg|25906851|$RUSTDESK_MACOS_ARM64_SHA256
+          EOF
 
-          python3 - <<'PY'
+          ROWS="$rows" OUTPUT="$output/macos-vendor-verification.json" \
+          RUSTDESK_VERSION="$RUSTDESK_VERSION" python3 - <<'PY'
+          import datetime
           import json
           import os
-          import subprocess
+          from pathlib import Path
 
-          expected = {
-              "Sinbar-Support-Assistant-Setup.exe",
-              "Sinbar-Support-Assistant.pkg",
-              "release-manifest.json",
-              "SHA256SUMS.txt",
+          assets = []
+          for line in Path(os.environ['ROWS']).read_text(encoding='utf-8').splitlines():
+              architecture, name, size, digest, bundle_id, team_id = line.split('\t')
+              assets.append({
+                  'architecture': architecture,
+                  'name': name,
+                  'bytes': int(size),
+                  'sha256': digest,
+                  'bundleIdentifier': bundle_id,
+                  'teamIdentifier': team_id,
+                  'codesignVerified': True,
+                  'gatekeeperAccepted': True,
+              })
+          if len(assets) != 2 or len({row['teamIdentifier'] for row in assets}) != 1:
+              raise SystemExit('ERROR: both macOS packages must use one common Team ID')
+          receipt = {
+              'schemaVersion': 1,
+              'vendor': 'RustDesk',
+              'vendorVersion': os.environ['RUSTDESK_VERSION'],
+              'verifiedAt': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'assets': assets,
           }
-          payload = json.loads(
-              subprocess.check_output(
-                  ["gh", "release", "view", os.environ["GITHUB_REF_NAME"], "--json", "assets,isDraft"],
-                  text=True,
-              )
+          Path(os.environ['OUTPUT']).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + '\n', encoding='utf-8'
           )
-          actual = {item["name"] for item in payload["assets"]}
-          if actual != expected or payload["isDraft"] is not True:
-              raise SystemExit(
-                  f"ERROR: draft release verification failed; expected={sorted(expected)}, actual={sorted(actual)}"
-              )
           PY
 
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+      - name: Upload unchanged verified macOS assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-macos
+          path: |
+            ${{ runner.temp }}/verified-macos/rustdesk-1.4.9-x86_64.dmg
+            ${{ runner.temp }}/verified-macos/rustdesk-1.4.9-aarch64.dmg
+            ${{ runner.temp }}/verified-macos/macos-vendor-verification.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+
