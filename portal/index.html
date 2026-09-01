@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050505">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Start a secure attended remote-support session with Sinbar Consultants.">
+  <meta name="description" content="Start secure attended remote support with Sinbar Consultants.">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; media-src 'none'; font-src 'none'; worker-src 'none'; manifest-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; media-src 'none'; font-src 'none'; worker-src 'none'">
   <title>Sinbar Remote Support</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <script src="/assets/app.js" defer></script>
@@ -35,8 +35,8 @@
       <section class="launch-stage" id="support-launcher" aria-labelledby="page-title">
         <div class="launch-copy">
           <p class="eyebrow">Official Sinbar support portal</p>
-          <h1 id="page-title">Start remote support.<br><span>We will guide the rest.</span></h1>
-          <p class="lead">One secure button opens the Sinbar Support Assistant already installed on your computer. On your first visit, we will help you install it once.</p>
+          <h1 id="page-title">Start remote support.<br><span>One click gets you ready.</span></h1>
+          <p class="lead">Download the official, digitally signed RustDesk support app preconfigured for Sinbar. No account and no permanent support password are created.</p>
 
           <div class="device-line" aria-live="polite">
             <span class="device-indicator" aria-hidden="true"></span>
@@ -51,15 +51,15 @@
             </span>
             <span class="button-copy">
               <strong>Start Remote Support</strong>
-              <small id="start-button-detail">Open the secure Sinbar assistant</small>
+              <small id="start-button-detail">Download the correct secure support app</small>
             </span>
-            <span class="button-arrow" aria-hidden="true">&rarr;</span>
+            <span class="button-arrow" aria-hidden="true">&darr;</span>
           </button>
 
           <p class="start-help" id="start-help">Only continue when you are already speaking with a Sinbar technician.</p>
 
           <div class="launch-status" id="launch-status" role="status" aria-live="polite" aria-atomic="true" hidden>
-            <span class="status-spinner" id="status-spinner" aria-hidden="true"></span>
+            <span class="status-spinner" aria-hidden="true"></span>
             <span id="status-message"></span>
           </div>
         </div>
@@ -67,57 +67,57 @@
         <aside class="process-card" aria-labelledby="process-title">
           <div class="process-card-head">
             <p class="card-kicker">How it works</p>
-            <h2 id="process-title">Fast now. Easier next time.</h2>
+            <h2 id="process-title">Fast, safe, and attended.</h2>
           </div>
 
           <ol class="process-list">
             <li class="process-step">
               <span class="step-number" aria-hidden="true">1</span>
               <div>
-                <strong>Start the session</strong>
-                <p>Click the gold button. A short-lived, one-time session is created for this device.</p>
+                <strong>Download</strong>
+                <p>The gold button downloads the official RustDesk app for this computer.</p>
               </div>
             </li>
             <li class="process-step">
               <span class="step-number" aria-hidden="true">2</span>
               <div>
-                <strong>Open Sinbar Support</strong>
-                <p>Returning customers approve the browser prompt and the installed assistant opens.</p>
+                <strong>Open and approve</strong>
+                <p>Open the downloaded file and approve the operating-system security prompt.</p>
               </div>
             </li>
             <li class="process-step">
               <span class="step-number" aria-hidden="true">3</span>
               <div>
-                <strong>Approve attended access</strong>
-                <p>You remain in control and can end the support session at any time.</p>
+                <strong>Share the one-time code</strong>
+                <p>Give the displayed ID and one-time password only to your Sinbar technician.</p>
               </div>
             </li>
           </ol>
 
           <div class="trust-row" aria-label="Security safeguards">
-            <span>One-time session</span>
-            <span>Sinbar sends no password</span>
+            <span>Official signed app</span>
+            <span>Attended access only</span>
           </div>
         </aside>
       </section>
 
       <section class="visit-guidance" aria-labelledby="visit-title">
         <div class="section-heading">
-          <p class="eyebrow">One button, two paths</p>
+          <p class="eyebrow">Platform guidance</p>
           <h2 id="visit-title">What you will see</h2>
         </div>
 
         <div class="visit-grid">
           <article class="visit-card returning-card">
-            <span class="visit-label">Returning visit</span>
-            <h3>The assistant opens directly</h3>
-            <p>Your browser may ask permission to open <strong>Sinbar Support</strong>. Select <strong>Open</strong>; the assistant handles the secure connection.</p>
+            <span class="visit-label">Windows 10 or 11</span>
+            <h3>Open the downloaded EXE</h3>
+            <p>Windows will identify the publisher as <strong>PURSLANE</strong>. Approve the prompt; RustDesk opens already pointed to Sinbar's support server.</p>
           </article>
 
           <article class="visit-card first-card">
-            <span class="visit-label">First visit</span>
-            <h3>Install and approve once</h3>
-            <p>If the assistant is not installed, choose the signed Windows or macOS installer. Your operating system will request administrator approval.</p>
+            <span class="visit-label">macOS</span>
+            <h3>Install the official RustDesk app</h3>
+            <p>Open the DMG, move RustDesk to Applications, import the Sinbar server configuration, and approve Apple's Screen Recording and Accessibility permissions.</p>
           </article>
         </div>
       </section>
@@ -128,17 +128,17 @@
           <h2 id="security-title">You control every session.</h2>
         </div>
         <ul>
-          <li>The launch token is short-lived and usable once.</li>
-          <li>The Sinbar workflow never creates or sends a permanent password.</li>
-          <li>Installers must be code-signed before publication.</li>
-          <li>Never approve a session from an unexpected caller.</li>
+          <li>Windows downloads retain RustDesk's valid PURSLANE Authenticode signature.</li>
+          <li>macOS downloads remain the unchanged official signed and notarized DMGs.</li>
+          <li>Sinbar does not create or embed a permanent password.</li>
+          <li>Close RustDesk to end attended support.</li>
         </ul>
       </section>
 
       <noscript>
         <section class="noscript-panel" aria-labelledby="javascript-title">
-          <h2 id="javascript-title">JavaScript is required to create a secure session</h2>
-          <p>Enable JavaScript and reload this page, or contact Sinbar support at <a href="tel:+13477200367">347-720-0367</a>.</p>
+          <h2 id="javascript-title">Choose your computer</h2>
+          <p><a href="/download/windows/x64">Windows x64</a> &middot; <a href="/download/windows/arm64">Windows ARM64</a> &middot; <a href="/download/macos/apple-silicon">Mac Apple silicon</a> &middot; <a href="/download/macos/intel">Mac Intel</a></p>
         </section>
       </noscript>
     </main>
@@ -163,39 +163,45 @@
         </svg>
       </div>
 
-      <p class="dialog-kicker" id="dialog-kicker">First visit</p>
-      <h2 id="dialog-title">Did Sinbar Support open?</h2>
-      <p id="dialog-description">If your browser displayed an <strong>Open Sinbar Support</strong> prompt, approve it. If nothing opened, install the signed assistant once.</p>
+      <p class="dialog-kicker" id="dialog-kicker">Download ready</p>
+      <h2 id="dialog-title">Open the support app</h2>
+      <p id="dialog-description">Open the downloaded file, approve the operating-system prompt, and share the displayed ID and one-time password with your Sinbar technician.</p>
 
-      <div class="installer-actions" aria-label="Sinbar Support Assistant installers">
-        <a class="installer-link" id="windows-installer" href="/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe">
+      <div class="installer-actions" aria-label="Official RustDesk downloads">
+        <a class="installer-link" id="windows-x64" href="/download/windows/x64">
           <span class="installer-platform" aria-hidden="true">&#8862;</span>
-          <span>
-            <strong>Install for Windows</strong>
-            <small>Signed setup &middot; Windows 10 or 11</small>
-          </span>
+          <span><strong>Windows x64</strong><small>Most Windows PCs &middot; publisher PURSLANE</small></span>
           <span class="installer-arrow" aria-hidden="true">&darr;</span>
         </a>
 
-        <a class="installer-link" id="macos-installer" href="/download/v2.0.0/macos/Sinbar-Support-Assistant.pkg">
+        <a class="installer-link" id="windows-arm64" href="/download/windows/arm64">
+          <span class="installer-platform" aria-hidden="true">&#8862;</span>
+          <span><strong>Windows ARM64</strong><small>Snapdragon and Windows ARM PCs</small></span>
+          <span class="installer-arrow" aria-hidden="true">&darr;</span>
+        </a>
+
+        <a class="installer-link" id="macos-arm64" href="/download/macos/apple-silicon">
           <span class="installer-platform" aria-hidden="true">&#8984;</span>
-          <span>
-            <strong>Install for macOS</strong>
-            <small>Signed and notarized package</small>
-          </span>
+          <span><strong>Mac Apple silicon</strong><small>M1, M2, M3, M4, or newer</small></span>
+          <span class="installer-arrow" aria-hidden="true">&darr;</span>
+        </a>
+
+        <a class="installer-link" id="macos-x64" href="/download/macos/intel">
+          <span class="installer-platform" aria-hidden="true">&#8984;</span>
+          <span><strong>Mac Intel</strong><small>Intel processor Macs</small></span>
           <span class="installer-arrow" aria-hidden="true">&darr;</span>
         </a>
       </div>
 
       <div class="first-time-steps">
-        <p><strong>First time:</strong> Open the downloaded installer, approve the operating-system prompt, then return here and select <strong>Start Remote Support</strong>.</p>
-        <p class="mac-permission-note" id="mac-permission-note" hidden><strong>Mac:</strong> Apple also requires you to approve Screen Recording and Accessibility. Those privacy safeguards cannot be skipped.</p>
+        <p id="platform-instructions"><strong>Windows:</strong> Open the EXE and approve the security prompt. RustDesk starts without installing a permanent support service.</p>
+        <p class="mac-permission-note" id="mac-permission-note" hidden><strong>Mac:</strong> After installation, copy the Sinbar configuration below and import it in RustDesk under Settings &rarr; Network. Apple will also require Screen Recording and Accessibility approval.</p>
       </div>
 
       <div class="dialog-footer">
-        <button class="try-again" id="try-again" type="button">Try opening again</button>
+        <button class="try-again" id="copy-config" type="button" hidden>Copy Sinbar server configuration</button>
         <form method="dialog">
-          <button class="not-now" type="submit">Not now</button>
+          <button class="not-now" type="submit">Close</button>
         </form>
       </div>
     </div>

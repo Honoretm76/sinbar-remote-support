@@ -1,18 +1,16 @@
 "use strict";
 
 (function () {
-  var SESSION_ENDPOINT = "/api/v1/support/sessions";
-  var SESSION_TIMEOUT_MS = 10000;
-  var FALLBACK_DELAY_MS = 4200;
-  // The server issues exactly 32 random bytes encoded as unpadded base64url
-  // (43 characters) for a fixed 120-second lifetime. Allow a small clock/
-  // transport margin when validating expiresAt, but reject every other shape.
-  var MAX_SESSION_LIFETIME_MS = 3 * 60 * 1000;
-  var TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-  var PROTOCOL_PATTERN = /^sinbarsupport:\/\/start\?token=([A-Za-z0-9_-]{43})$/;
-  var INSTALLERS = Object.freeze({
-    windows: "/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe",
-    macos: "/download/v2.0.0/macos/Sinbar-Support-Assistant.pkg"
+  var SERVER_CONFIG = "=0nI9sWYnZ2Yll1bPl1V3FmQ6hzRiZ2bytEWLl2R4pkTS1GZ15UUykkc4hDcQJnI6ISeltmIsIiI6ISawFmIsICdl5mLzRnbhRHb1NnbvNmchJmbpNnLlR3btVmciojI5FGblJnIsICdl5mLzRnbhRHb1NnbvNmchJmbpNnLlR3btVmciojI0N3boJye";
+  var DOWNLOADS = Object.freeze({
+    windows: Object.freeze({
+      x86_64: "/download/windows/x64",
+      arm64: "/download/windows/arm64"
+    }),
+    macos: Object.freeze({
+      x86_64: "/download/macos/intel",
+      arm64: "/download/macos/apple-silicon"
+    })
   });
 
   var startButton = document.getElementById("start-support");
@@ -24,39 +22,25 @@
   var dialogKicker = document.getElementById("dialog-kicker");
   var dialogTitle = document.getElementById("dialog-title");
   var dialogDescription = document.getElementById("dialog-description");
-  var windowsInstaller = document.getElementById("windows-installer");
-  var macosInstaller = document.getElementById("macos-installer");
+  var platformInstructions = document.getElementById("platform-instructions");
   var macPermissionNote = document.getElementById("mac-permission-note");
-  var tryAgainButton = document.getElementById("try-again");
+  var copyConfigButton = document.getElementById("copy-config");
+  var downloadLinks = Array.prototype.slice.call(
+    document.querySelectorAll(".installer-link")
+  );
 
   var platform = detectPlatform();
   var architecturePromise = detectArchitecture(platform);
-  var fallbackTimer = null;
-  var launchInProgress = false;
 
   configureDevicePresentation(platform);
 
   startButton.addEventListener("click", startSupport);
-  tryAgainButton.addEventListener("click", function () {
-    closeDialog();
-    startSupport();
-  });
+  copyConfigButton.addEventListener("click", copyServerConfiguration);
 
-  [windowsInstaller, macosInstaller].forEach(function (link) {
+  downloadLinks.forEach(function (link) {
     link.addEventListener("click", function () {
-      setStatus(
-        "The installer download has started. Open it from your Downloads folder and approve the operating-system prompt.",
-        "success"
-      );
+      setStatus("Download started. Open the file from your Downloads folder.", "success");
     });
-  });
-
-  document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "hidden" && fallbackTimer !== null) {
-      window.clearTimeout(fallbackTimer);
-      fallbackTimer = null;
-      setStatus("Sinbar Support was opened. Follow the instructions in the assistant.", "success");
-    }
   });
 
   assistantDialog.addEventListener("close", function () {
@@ -116,186 +100,101 @@
   }
 
   function configureDevicePresentation(currentPlatform) {
-    windowsInstaller.classList.remove("recommended");
-    macosInstaller.classList.remove("recommended");
-    macPermissionNote.hidden = currentPlatform !== "macos";
+    downloadLinks.forEach(function (link) {
+      link.classList.remove("recommended");
+    });
 
     if (currentPlatform === "windows") {
       deviceSummary.textContent = "Windows device detected";
-      startButtonDetail.textContent = "Open Sinbar Support for Windows";
-      windowsInstaller.classList.add("recommended");
+      startButtonDetail.textContent = "Download secure support for Windows";
+      document.getElementById("windows-x64").classList.add("recommended");
+      document.getElementById("windows-arm64").classList.add("recommended");
       return;
     }
 
     if (currentPlatform === "macos") {
       deviceSummary.textContent = "Mac detected";
-      startButtonDetail.textContent = "Open Sinbar Support for macOS";
-      macosInstaller.classList.add("recommended");
+      startButtonDetail.textContent = "Choose the correct Mac download";
+      document.getElementById("macos-arm64").classList.add("recommended");
+      document.getElementById("macos-x64").classList.add("recommended");
       return;
     }
 
     deviceSummary.textContent = "Windows or macOS is required";
-    startButtonDetail.textContent = "View supported installation options";
+    startButtonDetail.textContent = "View supported download options";
   }
 
   async function startSupport() {
-    if (launchInProgress) {
-      return;
-    }
-
-    if (platform === "unknown") {
-      setStatus("This device could not be identified as Windows or macOS.", "error");
-      showFallback("unsupported");
-      return;
-    }
-
-    launchInProgress = true;
-    setLoading(true);
-    setStatus("Creating a secure, one-time support session…", "loading");
+    startButton.disabled = true;
+    startButton.setAttribute("aria-busy", "true");
 
     try {
       var architecture = await architecturePromise;
-      var session = await createSession(platform, architecture);
 
-      setStatus("Secure session ready. Approve the browser prompt to open Sinbar Support.", "success");
-      scheduleFallback();
-      openRegisteredAssistant(session.protocolUrl);
-    } catch (error) {
-      clearFallbackTimer();
-      setStatus("We could not start a secure session. You can install the assistant below, then try again.", "error");
-      showFallback("session-error");
+      if (platform === "windows") {
+        var windowsArchitecture = architecture === "arm64" ? "arm64" : "x86_64";
+        showInstructions("windows");
+        beginDownload(DOWNLOADS.windows[windowsArchitecture]);
+        return;
+      }
+
+      if (platform === "macos" && (architecture === "arm64" || architecture === "x86_64")) {
+        showInstructions("macos");
+        beginDownload(DOWNLOADS.macos[architecture]);
+        return;
+      }
+
+      if (platform === "macos") {
+        setStatus("Choose Apple silicon or Intel in the download window.", "success");
+        showInstructions("macos");
+        return;
+      }
+
+      setStatus("Choose the correct Windows or Mac download.", "success");
+      showInstructions("unknown");
     } finally {
-      launchInProgress = false;
-      setLoading(false);
+      startButton.disabled = false;
+      startButton.setAttribute("aria-busy", "false");
     }
   }
 
-  async function createSession(currentPlatform, architecture) {
-    var abortController = new AbortController();
-    var timeout = window.setTimeout(function () {
-      abortController.abort();
-    }, SESSION_TIMEOUT_MS);
+  function beginDownload(url) {
+    if (!isAllowedDownload(url)) {
+      throw new Error("Blocked unexpected download URL");
+    }
 
-    try {
-      var response = await fetch(SESSION_ENDPOINT, {
-        method: "POST",
-        mode: "same-origin",
-        credentials: "same-origin",
-        cache: "no-store",
-        redirect: "error",
-        referrerPolicy: "no-referrer",
-        headers: {
-          "Accept": "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          platform: currentPlatform,
-          architecture: architecture
-        }),
-        signal: abortController.signal
+    setStatus("Download started. Open the file from your Downloads folder.", "success");
+    window.location.assign(url);
+  }
+
+  function isAllowedDownload(url) {
+    return Object.keys(DOWNLOADS).some(function (platformName) {
+      return Object.keys(DOWNLOADS[platformName]).some(function (architectureName) {
+        return DOWNLOADS[platformName][architectureName] === url;
       });
-
-      if (!response.ok) {
-        throw new Error("Session request failed");
-      }
-
-      var contentType = response.headers.get("content-type") || "";
-      if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
-        throw new Error("Unexpected session response");
-      }
-
-      var payload = await response.json();
-      return validateSession(payload, currentPlatform);
-    } finally {
-      window.clearTimeout(timeout);
-    }
-  }
-
-  function validateSession(payload, currentPlatform) {
-    if (!payload || Object.prototype.toString.call(payload) !== "[object Object]") {
-      throw new Error("Invalid session response");
-    }
-
-    var protocolUrl = String(payload.protocolUrl || "");
-    var protocolMatch = PROTOCOL_PATTERN.exec(protocolUrl);
-
-    if (!protocolMatch || !TOKEN_PATTERN.test(protocolMatch[1])) {
-      throw new Error("Invalid launch protocol");
-    }
-
-    var expectedProtocolUrl = "sinbarsupport://start?token=" + protocolMatch[1];
-    if (protocolUrl !== expectedProtocolUrl) {
-      throw new Error("Non-canonical launch protocol");
-    }
-
-    var expectedInstaller = INSTALLERS[currentPlatform];
-    if (typeof payload.installerUrl !== "string" || payload.installerUrl !== expectedInstaller) {
-      throw new Error("Invalid installer location");
-    }
-
-    var expiresAt = Date.parse(String(payload.expiresAt || ""));
-    var now = Date.now();
-
-    if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt - now > MAX_SESSION_LIFETIME_MS) {
-      throw new Error("Invalid session expiration");
-    }
-
-    return Object.freeze({
-      protocolUrl: expectedProtocolUrl,
-      installerUrl: expectedInstaller,
-      expiresAt: expiresAt
     });
   }
 
-  function openRegisteredAssistant(protocolUrl) {
-    if (!PROTOCOL_PATTERN.test(protocolUrl)) {
-      throw new Error("Unsafe launch target");
-    }
+  function showInstructions(currentPlatform) {
+    configureDevicePresentation(currentPlatform);
+    copyConfigButton.hidden = currentPlatform !== "macos";
+    macPermissionNote.hidden = currentPlatform !== "macos";
 
-    var launchLink = document.createElement("a");
-    launchLink.href = protocolUrl;
-    launchLink.rel = "noopener noreferrer";
-    launchLink.setAttribute("aria-hidden", "true");
-    launchLink.tabIndex = -1;
-
-    document.body.appendChild(launchLink);
-    launchLink.click();
-    launchLink.remove();
-  }
-
-  function scheduleFallback() {
-    clearFallbackTimer();
-    fallbackTimer = window.setTimeout(function () {
-      fallbackTimer = null;
-
-      if (document.visibilityState === "visible") {
-        showFallback("not-opened");
-      }
-    }, FALLBACK_DELAY_MS);
-  }
-
-  function clearFallbackTimer() {
-    if (fallbackTimer !== null) {
-      window.clearTimeout(fallbackTimer);
-      fallbackTimer = null;
-    }
-  }
-
-  function showFallback(reason) {
-    configureDevicePresentation(platform);
-
-    if (reason === "session-error") {
-      dialogKicker.textContent = "Connection help";
-      dialogTitle.textContent = "The secure session could not start";
-      dialogDescription.textContent = "Install the Sinbar Support Assistant if this is your first visit. Then close this window and try again.";
-    } else if (reason === "unsupported") {
-      dialogKicker.textContent = "Supported devices";
-      dialogTitle.textContent = "Choose a Windows or macOS installer";
-      dialogDescription.textContent = "Sinbar Support Assistant is available for Windows 10 or 11 and current macOS computers.";
+    if (currentPlatform === "windows") {
+      dialogKicker.textContent = "Windows download";
+      dialogTitle.textContent = "Open the downloaded EXE";
+      dialogDescription.textContent = "Confirm that Windows shows PURSLANE as the publisher, approve the prompt, and share the one-time RustDesk code with your Sinbar technician.";
+      platformInstructions.textContent = "Windows: Open the EXE and approve the security prompt. RustDesk starts without installing a permanent support service.";
+    } else if (currentPlatform === "macos") {
+      dialogKicker.textContent = "Mac download";
+      dialogTitle.textContent = "Install and configure RustDesk";
+      dialogDescription.textContent = "Choose Apple silicon or Intel, open the DMG, and move RustDesk to Applications.";
+      platformInstructions.textContent = "Mac: Launch RustDesk, open Settings → Network, unlock the settings, choose Import Server Config, and paste the copied Sinbar configuration.";
     } else {
-      dialogKicker.textContent = "First visit";
-      dialogTitle.textContent = "Did Sinbar Support open?";
-      dialogDescription.textContent = "If your browser displayed an Open Sinbar Support prompt, approve it. If nothing opened, install the signed assistant once.";
+      dialogKicker.textContent = "Choose your computer";
+      dialogTitle.textContent = "Select the correct secure download";
+      dialogDescription.textContent = "Choose Windows x64, Windows ARM64, Mac Apple silicon, or Mac Intel.";
+      platformInstructions.textContent = "If you are unsure which option applies, ask your Sinbar technician before opening a file.";
     }
 
     if (typeof assistantDialog.showModal === "function") {
@@ -307,17 +206,19 @@
     }
   }
 
-  function closeDialog() {
-    if (typeof assistantDialog.close === "function" && assistantDialog.open) {
-      assistantDialog.close();
-    } else {
-      assistantDialog.removeAttribute("open");
+  async function copyServerConfiguration() {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+      setStatus("Clipboard access is unavailable. Ask your Sinbar technician to provide the server configuration.", "error");
+      return;
     }
-  }
 
-  function setLoading(isLoading) {
-    startButton.disabled = isLoading;
-    startButton.setAttribute("aria-busy", isLoading ? "true" : "false");
+    try {
+      await navigator.clipboard.writeText(SERVER_CONFIG);
+      copyConfigButton.textContent = "Configuration copied";
+      setStatus("Sinbar server configuration copied. Paste it into RustDesk Import Server Config.", "success");
+    } catch (error) {
+      setStatus("The browser blocked clipboard access. Ask your Sinbar technician for the configuration.", "error");
+    }
   }
 
   function setStatus(message, state) {

@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 2,
-  "portalVersion": "2.0.0",
-  "experience": "intel-style-local-assistant-launch",
+  "schemaVersion": 3,
+  "portalVersion": "2.1.0",
+  "experience": "vendor-signed-rustdesk-download",
   "supportMode": "attended",
   "permanentPasswordConfigured": false,
   "brand": {
@@ -17,52 +17,90 @@
       "#ffffff"
     ]
   },
-  "sessionContract": {
-    "method": "POST",
-    "path": "/api/v1/support/sessions",
-    "requestFields": [
-      "platform",
-      "architecture"
-    ],
-    "responseFields": [
-      "protocolUrl",
-      "expiresAt",
-      "installerUrl"
-    ],
-    "protocolTemplate": "sinbarsupport://start?token=<base64url>",
-    "maximumLifetimeSeconds": 120,
-    "sameOriginOnly": true,
-    "cache": "no-store"
+  "supportServer": {
+    "host": "remote.sinbarconsultants.net",
+    "relay": "remote.sinbarconsultants.net",
+    "apiConfigured": false,
+    "publicKeySha256": "2f9f17cd56abc92fe53c75aafb97184841f5c4030d39f06164c47f1e0b2cd6aa"
   },
-  "installers": [
+  "upstream": {
+    "project": "RustDesk",
+    "version": "1.4.9",
+    "release": "https://github.com/rustdesk/rustdesk/releases/tag/1.4.9",
+    "license": "AGPL-3.0"
+  },
+  "packages": [
     {
       "platform": "windows",
-      "architectures": [
-        "x86_64",
-        "arm64"
-      ],
-      "path": "/download/v2.0.0/windows/Sinbar-Support-Assistant-Setup.exe",
+      "architecture": "x86_64",
+      "path": "/download/windows/x64",
+      "sourcePath": "/download/vendor/rustdesk/1.4.9/windows/rustdesk-1.4.9-x86_64.exe",
       "mediaType": "application/vnd.microsoft.portable-executable",
-      "signatureRequirement": "Authenticode signature from Sinbar Consultants LLC",
-      "publicationStatus": "artifact-required"
+      "bytes": 24472432,
+      "sha256": "eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274",
+      "signature": {
+        "type": "Authenticode",
+        "status": "Valid",
+        "publisherSubjectContains": "PURSLANE",
+        "publisherSpkiSha256": "85a1152301ba31d625ce06294584deaee9cf32c2dd7bdfdf72821499cd745116"
+      },
+      "configurationDelivery": "RustDesk-supported compact token in Content-Disposition filename",
+      "publicationStatus": "verified"
+    },
+    {
+      "platform": "windows",
+      "architecture": "arm64",
+      "path": "/download/windows/arm64",
+      "sourcePath": "/download/vendor/rustdesk/1.4.9/windows/rustdesk-1.4.9-aarch64.exe",
+      "mediaType": "application/vnd.microsoft.portable-executable",
+      "bytes": 22318960,
+      "sha256": "c717bf52fdd601c58419e46c503176dd87187d174ebf8b3b5854ca381e8e9145",
+      "signature": {
+        "type": "Authenticode",
+        "status": "Valid",
+        "publisherSubjectContains": "PURSLANE",
+        "publisherSpkiSha256": "85a1152301ba31d625ce06294584deaee9cf32c2dd7bdfdf72821499cd745116"
+      },
+      "configurationDelivery": "RustDesk-supported compact token in Content-Disposition filename",
+      "publicationStatus": "verified"
     },
     {
       "platform": "macos",
-      "architectures": [
-        "x86_64",
-        "arm64"
-      ],
-      "path": "/download/v2.0.0/macos/Sinbar-Support-Assistant.pkg",
-      "mediaType": "application/vnd.apple.installer+xml",
-      "signatureRequirement": "Apple Developer ID Installer signature, notarization, and stapling",
-      "publicationStatus": "artifact-required"
+      "architecture": "arm64",
+      "path": "/download/macos/apple-silicon",
+      "sourcePath": "/download/vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-aarch64.dmg",
+      "mediaType": "application/x-apple-diskimage",
+      "sha256": "f7935597b247d42c8f2a2ed71176a9f5868018cd9e1a33b8096418a668c8caf0",
+      "signature": {
+        "type": "Apple Developer ID",
+        "requireCodeSignature": true,
+        "requireGatekeeperAcceptance": true
+      },
+      "configurationDelivery": "Customer imports the exported Sinbar server configuration in RustDesk",
+      "publicationStatus": "verified"
+    },
+    {
+      "platform": "macos",
+      "architecture": "x86_64",
+      "path": "/download/macos/intel",
+      "sourcePath": "/download/vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-x86_64.dmg",
+      "mediaType": "application/x-apple-diskimage",
+      "sha256": "fa1129a0635019f9c5841937942cc2b08be028a192f47c009edde7e53812904e",
+      "signature": {
+        "type": "Apple Developer ID",
+        "requireCodeSignature": true,
+        "requireGatekeeperAcceptance": true
+      },
+      "configurationDelivery": "Customer imports the exported Sinbar server configuration in RustDesk",
+      "publicationStatus": "verified"
     }
   ],
   "security": {
-    "firstVisitRequiresLocalInstall": true,
-    "administratorApprovalRequired": true,
-    "arbitraryProtocolUrlsAccepted": false,
-    "arbitraryInstallerUrlsAccepted": false,
+    "customProtocolRequired": false,
+    "browserAutoExecutionAttempted": false,
+    "customBinaryBuiltBySinbar": false,
+    "upstreamBytesModified": false,
+    "administratorApprovalMayBeRequired": true,
     "externalAssets": false,
     "telemetry": false,
     "secretsEmbedded": false

@@ -1,0 +1,4 @@
+eaedeb0088e687bf46f7c46a9c6ea5493ce51f3134dfd6acbedb47b5b9136274  vendor/rustdesk/1.4.9/windows/rustdesk-1.4.9-x86_64.exe
+c717bf52fdd601c58419e46c503176dd87187d174ebf8b3b5854ca381e8e9145  vendor/rustdesk/1.4.9/windows/rustdesk-1.4.9-aarch64.exe
+fa1129a0635019f9c5841937942cc2b08be028a192f47c009edde7e53812904e  vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-x86_64.dmg
+f7935597b247d42c8f2a2ed71176a9f5868018cd9e1a33b8096418a668c8caf0  vendor/rustdesk/1.4.9/macos/rustdesk-1.4.9-aarch64.dmg
