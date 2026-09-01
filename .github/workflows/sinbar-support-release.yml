@@ -138,7 +138,10 @@ jobs:
             }
           )
 
-          if (($rows.publisherSpkiSha256 | Select-Object -Unique).Count -ne 1) {
+          $uniquePublisherPins = @(
+            $rows | ForEach-Object { $_.publisherSpkiSha256 } | Select-Object -Unique
+          )
+          if ($uniquePublisherPins.Count -ne 1) {
             throw 'The two Windows packages do not use the same publisher key.'
           }
           $receipt = [ordered]@{
