@@ -49,6 +49,18 @@ GitHub Actions independently re-downloads both Windows EXEs and both macOS
 DMGs, enforces their SHA-256 values, verifies Windows Authenticode and the
 publisher key pin, and verifies Apple Developer ID/Gatekeeper acceptance.
 
-Legacy custom-assistant source remains in repository history only. It is not
-part of this release or customer flow.
+## Production deployment
 
+After this revision is merged and its `main` workflow is green, download the
+private repository ZIP, upload it to `noc-support`, and run:
+
+    sudo ./deploy/sinbar-support-deploy /path/to/sinbar-remote-support-main.zip
+
+The deployer downloads only the four fixed official RustDesk 1.4.9 assets,
+checks their exact sizes and SHA-256 values, validates the reviewed portal and
+Nginx sources, creates a verified backup, deploys with automatic rollback, and
+tests every local and public route including TLS, MIME type,
+`Content-Disposition`, byte count, and response hash.
+
+Legacy custom-assistant source remains in the repository for reference. The
+2.1.0 workflow, deployer, portal, and customer flow do not build or use it.
