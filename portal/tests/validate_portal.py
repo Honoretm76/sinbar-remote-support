@@ -20,6 +20,7 @@ LOGO = ROOT / "assets/sinbar-primary-logo.jpg"
 MANIFEST = ROOT / "download/manifest.json"
 CHECKSUMS = ROOT / "download/SHA256SUMS.txt"
 NGINX = ROOT.parent / "deploy/nginx.conf"
+DEPLOYER = ROOT.parent / "deploy/sinbar-support-deploy"
 
 LOGO_SHA256 = "984ed311238503646099debb13ab82369b795b8e289c4a7b6a98de3f4bfed9ed"
 PUBLIC_KEY_SHA256 = "2f9f17cd56abc92fe53c75aafb97184841f5c4030d39f06164c47f1e0b2cd6aa"
@@ -132,7 +133,7 @@ def validate_configuration(javascript: str, nginx: str) -> None:
 
 
 def main() -> int:
-    for path in (INDEX, APP, STYLES, MANIFEST, CHECKSUMS, NGINX):
+    for path in (INDEX, APP, STYLES, MANIFEST, CHECKSUMS, NGINX, DEPLOYER):
         require(path.is_file(), f"Missing required file: {path}")
         require(path.stat().st_size > 0, f"Empty required file: {path}")
 
@@ -140,6 +141,7 @@ def main() -> int:
     javascript = APP.read_text(encoding="utf-8")
     css = STYLES.read_text(encoding="utf-8")
     nginx = NGINX.read_text(encoding="utf-8")
+    deployer = DEPLOYER.read_text(encoding="utf-8")
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     checksums: dict[str, str] = {}
     for line in CHECKSUMS.read_text(encoding="utf-8").splitlines():
@@ -231,7 +233,7 @@ def main() -> int:
 
     validate_configuration(javascript, nginx)
 
-    combined = "\n".join((html, javascript, css, json.dumps(manifest), nginx))
+    combined = "\n".join((html, javascript, css, json.dumps(manifest), nginx, deployer))
     for marker in ("-----BEGIN PRIVATE KEY-----", "dop_v1_", "ghp_", "AKIA"):
         require(marker not in combined, f"Possible embedded secret found: {marker}")
 
@@ -241,6 +243,10 @@ def main() -> int:
     require("access_log /dev/stdout;" in nginx, "Nginx access logging contract changed")
     require("frame-ancestors 'none'" in nginx, "Server CSP must block framing")
     require("location /" in nginx and "return 404;" in nginx, "Default deny route missing")
+    require("restore_backup" in deployer, "Production deployer has no automatic rollback")
+    require("verify_portal_endpoint \"$PUBLIC_BASE\"" in deployer, "Production deployer does not verify public routes")
+    require("support-session-api" not in deployer, "Legacy session API remains in production deployer")
+    require(".msi" not in deployer and ".pkg" not in deployer, "Legacy custom installer remains in production deployer")
     require("/api/v1/support/sessions" not in combined, "Paid-assistant session API remains active")
     require("Sinbar-Support-Assistant" not in combined, "Unavailable custom assistant remains referenced")
 
