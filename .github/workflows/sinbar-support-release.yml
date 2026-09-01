@@ -100,8 +100,10 @@ jobs:
                 throw "SHA-256 mismatch for $($asset.name)."
               }
 
-              & $signTool.FullName verify /pa /all /v $path
-              if ($LASTEXITCODE -ne 0) {
+              $signToolOutput = & $signTool.FullName verify /pa /all /v $path 2>&1
+              $signToolExitCode = $LASTEXITCODE
+              $signToolOutput | Out-Host
+              if ($signToolExitCode -ne 0) {
                 throw "SignTool policy verification failed for $($asset.name)."
               }
 
@@ -265,4 +267,3 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
-
