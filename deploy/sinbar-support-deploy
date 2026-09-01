@@ -565,15 +565,46 @@ cp --preserve=mode,ownership,timestamps -- "${WORK_ROOT}/nginx.conf" "$NGINX_CON
 
 docker exec "$CONTAINER" nginx -t
 atomic_install "${STAGE_SITE}/index.html" "${LIVE_ROOT}/index.html"
+
+# nginx -s reload is asynchronous. Capture the current worker generation
+# before signalling the master, then wait until every old worker has exited.
+# This prevents verification requests from reaching the previous routing
+# table through an already-established connection.
+mapfile -t pre_reload_worker_pids < <(
+    docker top "$CONTAINER" -eo pid,args |
+        awk 'NR > 1 && /nginx: worker process/ {print $1}'
+)
+(( ${#pre_reload_worker_pids[@]} > 0 )) ||
+    die "Could not identify the pre-reload Nginx worker generation"
+
 docker exec "$CONTAINER" nginx -s reload
 
-for attempt in $(seq 1 30); do
-    if curl --max-time 5 --silent --show-error --fail "${LOCAL_BASE}/health" >/dev/null; then
+for attempt in $(seq 1 120); do
+    old_workers_remaining=0
+
+    for worker_pid in "${pre_reload_worker_pids[@]}"; do
+        if [[ -d "/proc/${worker_pid}" ]]; then
+            (( old_workers_remaining += 1 ))
+        fi
+    done
+
+    if (( old_workers_remaining == 0 )); then
         break
     fi
-    (( attempt < 30 )) || die "Portal health endpoint did not recover after Nginx reload"
-    sleep 2
+
+    (( attempt < 120 )) ||
+        die "Pre-reload Nginx workers did not drain within 120 seconds"
+    sleep 1
 done
+
+if ! reload_code="$(curl --max-time 10 --silent --show-error \
+    --output /dev/null --write-out '%{http_code}' \
+    "${LOCAL_BASE}/assets/styles.css")"
+then
+    die "New Nginx worker generation did not answer the stylesheet probe"
+fi
+[[ "$reload_code" == "200" ]] ||
+    die "New Nginx worker generation returned HTTP $reload_code for the stylesheet"
 
 verify_portal_endpoint "$LOCAL_BASE" "local"
 verify_portal_endpoint "$PUBLIC_BASE" "public"
