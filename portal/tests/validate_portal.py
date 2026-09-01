@@ -18,6 +18,7 @@ APP = ROOT / "assets/app.js"
 STYLES = ROOT / "assets/styles.css"
 LOGO = ROOT / "assets/sinbar-primary-logo.jpg"
 MANIFEST = ROOT / "download/manifest.json"
+CHECKSUMS = ROOT / "download/SHA256SUMS.txt"
 NGINX = ROOT.parent / "deploy/nginx.conf"
 
 LOGO_SHA256 = "984ed311238503646099debb13ab82369b795b8e289c4a7b6a98de3f4bfed9ed"
@@ -118,7 +119,7 @@ def validate_configuration(javascript: str, nginx: str) -> None:
     require(len(exported["key"]) == 44, "public key length mismatch")
     require(hashlib.sha256(exported["key"].encode()).hexdigest() == PUBLIC_KEY_SHA256, "public key digest mismatch")
 
-    filename_tokens = re.findall(r'filename="[^"]+-qs--([A-Za-z0-9_-]+)[.]exe"', nginx)
+    filename_tokens = re.findall(r'-qs--([A-Za-z0-9_-]+)[.]exe\\?"', nginx)
     require(len(filename_tokens) == 2, "both configured Windows filenames are required")
     require(len(set(filename_tokens)) == 1, "Windows architectures use different configuration tokens")
     portable = decode_reversed_urlsafe(filename_tokens[0])
@@ -131,7 +132,7 @@ def validate_configuration(javascript: str, nginx: str) -> None:
 
 
 def main() -> int:
-    for path in (INDEX, APP, STYLES, MANIFEST, NGINX):
+    for path in (INDEX, APP, STYLES, MANIFEST, CHECKSUMS, NGINX):
         require(path.is_file(), f"Missing required file: {path}")
         require(path.stat().st_size > 0, f"Empty required file: {path}")
 
@@ -140,6 +141,11 @@ def main() -> int:
     css = STYLES.read_text(encoding="utf-8")
     nginx = NGINX.read_text(encoding="utf-8")
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    checksums: dict[str, str] = {}
+    for line in CHECKSUMS.read_text(encoding="utf-8").splitlines():
+        digest, relative_path = line.split(maxsplit=1)
+        require(relative_path not in checksums, f"Duplicate checksum path: {relative_path}")
+        checksums[relative_path] = digest
 
     parser = PortalParser()
     parser.feed(html)
@@ -205,6 +211,11 @@ def main() -> int:
         for item in manifest["packages"]
     }
     require(set(packages) == set(ROUTES), "Manifest package matrix mismatch")
+    expected_checksums = {
+        item["sourcePath"].removeprefix("/download/"): item["sha256"]
+        for item in packages.values()
+    }
+    require(checksums == expected_checksums, "SHA256SUMS does not match the release manifest")
     for target, (route, digest) in ROUTES.items():
         item = packages[target]
         require(item["path"] == route, f"{target} path mismatch")
@@ -226,6 +237,7 @@ def main() -> int:
 
     require(re.search(r"@media \(prefers-reduced-motion: reduce\)", css) is not None, "Reduced-motion support missing")
     require("Content-Disposition" in nginx and "-qs--" in nginx, "Configured Windows download filename missing")
+    require("add_header_inherit" not in nginx, "Nginx config requires a newer add_header inheritance directive")
     require("access_log /dev/stdout;" in nginx, "Nginx access logging contract changed")
     require("frame-ancestors 'none'" in nginx, "Server CSP must block framing")
     require("location /" in nginx and "return 404;" in nginx, "Default deny route missing")
@@ -246,4 +258,3 @@ if __name__ == "__main__":
     except (AssertionError, KeyError, TypeError, ValueError, UnicodeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         raise SystemExit(1)
-
