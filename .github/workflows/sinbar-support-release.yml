@@ -4,14 +4,14 @@ on:
   pull_request:
     paths:
       - 'portal/**'
-      - 'deploy/nginx.conf'
+      - 'deploy/**'
       - '.github/workflows/sinbar-support-release.yml'
   push:
     branches:
       - main
     paths:
       - 'portal/**'
-      - 'deploy/nginx.conf'
+      - 'deploy/**'
       - '.github/workflows/sinbar-support-release.yml'
   workflow_dispatch:
 
