@@ -122,7 +122,7 @@ jobs:
                 throw "Publisher SPKI pin mismatch for $($asset.name)."
               }
 
-              [ordered]@{
+              [pscustomobject][ordered]@{
                 architecture = $asset.architecture
                 name = $asset.name
                 bytes = $asset.bytes
@@ -265,5 +265,4 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
-
 
