@@ -472,8 +472,7 @@ for key, (size, digest) in expected.items():
 print("PASS: portal manifest contract verified")
 PY
 
-grep -Fq "$SERVER_HOST" "${REPO_ROOT}/portal/assets/app.js" ||
-    die "Portal application does not contain the approved RustDesk host"
+python3 "${REPO_ROOT}/portal/tests/validate_portal.py"
 grep -Fq "$COMPACT_CONFIG_TOKEN" "${REPO_ROOT}/deploy/nginx.conf" ||
     die "Nginx configuration does not contain the approved compact RustDesk token"
 grep -Fq "$WINDOWS_X64_DOWNLOAD_NAME" "${REPO_ROOT}/deploy/nginx.conf" ||
